@@ -2,6 +2,8 @@ package mapreduce
 
 import (
 	"fmt"
+	"io/ioutil"
+	"os"
 	"strconv"
 )
 
@@ -40,4 +42,19 @@ func reduceName(jobName string, mapTask int, reduceTask int) string {
 // mergeName constructs the name of the output file of reduce task <reduceTask>
 func mergeName(jobName string, reduceTask int) string {
 	return "mrtmp." + jobName + "-res-" + strconv.Itoa(reduceTask)
+}
+
+func localFileReader(path string) []byte {
+	f, err := os.Open(path)
+	defer f.Close()
+
+	if err != nil {
+		return nil
+	}
+
+	b, err := ioutil.ReadAll(f)
+	if err != nil {
+		return nil
+	}
+	return b
 }

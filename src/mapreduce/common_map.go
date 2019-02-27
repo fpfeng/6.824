@@ -53,6 +53,18 @@ func doMap(
 	//
 	// Your code here (Part I).
 	//
+
+	// read inFile as string
+	b := localFileReader(inFile)
+	fileContent := string(b[:])
+
+	// get key, value pair
+	KVs := mapF(inFile, fileContent)
+
+	// partition to intermediate file
+	for _, singleKVPair := range KVs {
+		r := ihash(singleKVPair.Key) % nReduce
+	}
 }
 
 func ihash(s string) int {
