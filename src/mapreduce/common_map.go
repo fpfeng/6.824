@@ -1,7 +1,10 @@
 package mapreduce
 
 import (
+	"bufio"
+	"encoding/json"
 	"hash/fnv"
+	"os"
 )
 
 func doMap(
@@ -67,11 +70,24 @@ func doMap(
 		r := ihash(singleKVPair.Key) % nReduce
 
 		if group[r] == nil {
-			group[r] = make([]KeyValue, 1)
+			group[r] = make([]KeyValue, 0)
 		}
 		currentRContent := group[r]
 		currentRContent = append(currentRContent, singleKVPair)
 		group[r] = currentRContent
+	}
+
+	for reduceTask, KVs := range group {
+		intermediateFileName := reduceName(jobName, mapTask, reduceTask)
+		f, err := os.Create(intermediateFileName)
+		checkError(err)
+		defer f.Close()
+
+		w := bufio.NewWriter(f)
+		enc := json.NewEncoder(w)
+
+		err = enc.Encode(KVs)
+		checkError(err)
 	}
 }
 

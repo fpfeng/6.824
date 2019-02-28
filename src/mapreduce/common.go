@@ -58,3 +58,9 @@ func localFileReader(path string) []byte {
 	}
 	return b
 }
+
+func checkError(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
