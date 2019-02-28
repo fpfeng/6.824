@@ -62,8 +62,16 @@ func doMap(
 	KVs := mapF(inFile, fileContent)
 
 	// partition to intermediate file
+	group := make(map[int][]KeyValue)
 	for _, singleKVPair := range KVs {
 		r := ihash(singleKVPair.Key) % nReduce
+
+		if group[r] == nil {
+			group[r] = make([]KeyValue, 1)
+		}
+		currentRContent := group[r]
+		currentRContent = append(currentRContent, singleKVPair)
+		group[r] = currentRContent
 	}
 }
 
