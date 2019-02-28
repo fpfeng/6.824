@@ -1,5 +1,13 @@
 package mapreduce
 
+import (
+	"bufio"
+	"encoding/json"
+	"os"
+)
+
+type KVArray []struct{ KeyValue }
+
 func doReduce(
 	jobName string, // the name of the whole MapReduce job
 	reduceTask int, // which reduce task this is
@@ -44,4 +52,16 @@ func doReduce(
 	//
 	// Your code here (Part I).
 	//
+
+	intermediateFileName := reduceName(jobName, nMap-1, reduceTask)
+	f, err := os.Open(intermediateFileName)
+	defer f.Close()
+	checkError(err)
+
+	r := bufio.NewReader(f)
+	enc := json.NewDecoder(r)
+
+	var KVs KVArray
+	err = enc.Decode(&KVs)
+	checkError(err)
 }
