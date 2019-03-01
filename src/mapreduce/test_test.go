@@ -51,6 +51,7 @@ func check(t *testing.T, files []string) {
 	defer output.Close()
 
 	var lines []string
+	debug("%s\n", files)
 	for _, f := range files {
 		input, err := os.Open(f)
 		if err != nil {

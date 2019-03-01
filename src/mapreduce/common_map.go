@@ -84,8 +84,8 @@ func doMap(
 		defer f.Close()
 
 		w := bufio.NewWriter(f)
+		defer w.Flush()
 		enc := json.NewEncoder(w)
-
 		err = enc.Encode(KVs)
 		checkError(err)
 	}

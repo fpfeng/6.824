@@ -28,6 +28,7 @@ func (mr *Master) merge() {
 			if err != nil {
 				break
 			}
+			debug("dec key %s \n", kv.Key)
 			kvs[kv.Key] = kv.Value
 		}
 		file.Close()

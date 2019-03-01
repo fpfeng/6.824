@@ -3,6 +3,7 @@ package mapreduce
 import (
 	"bufio"
 	"encoding/json"
+	"io/ioutil"
 	"os"
 	"sort"
 )
@@ -67,19 +68,14 @@ func doReduce(
 	//
 
 	intermediateFileName := reduceName(jobName, nMap-1, reduceTask)
-	f, err := os.Open(intermediateFileName)
-	defer f.Close()
-	checkError(err)
-
-	r := bufio.NewReader(f)
-	dec := json.NewDecoder(r)
+	j, _ := ioutil.ReadFile(intermediateFileName)
 
 	var KVs KVArray
-	err = dec.Decode(&KVs)
-	checkError(err)
+	json.Unmarshal(j, &KVs)
 
 	sort.Sort(KVs)
 
+	debug("len: %d\n", len(KVs))
 	group := make(map[string][]string)
 
 	for _, kv := range KVs {
@@ -93,11 +89,12 @@ func doReduce(
 		group[kv.Key] = currentKeyContent
 	}
 
-	f, err = os.Create(outFile)
+	f, err := os.Create(outFile)
 	defer f.Close()
 	checkError(err)
 
 	w := bufio.NewWriter(f)
+	defer w.Flush()
 	enc := json.NewEncoder(w)
 
 	for k, values := range group {
