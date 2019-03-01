@@ -93,7 +93,7 @@ func doReduce(
 		group[kv.Key] = currentKeyContent
 	}
 
-	f, err = os.Create("outFile")
+	f, err = os.Create(outFile)
 	defer f.Close()
 	checkError(err)
 
