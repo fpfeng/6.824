@@ -72,10 +72,10 @@ func doReduce(
 	checkError(err)
 
 	r := bufio.NewReader(f)
-	enc := json.NewDecoder(r)
+	dec := json.NewDecoder(r)
 
 	var KVs KVArray
-	err = enc.Decode(&KVs)
+	err = dec.Decode(&KVs)
 	checkError(err)
 
 	sort.Sort(KVs)
@@ -91,5 +91,16 @@ func doReduce(
 		currentKeyContent = append(currentKeyContent, kv.Value)
 
 		group[kv.Key] = currentKeyContent
+	}
+
+	f, err = os.Create("outFile")
+	defer f.Close()
+	checkError(err)
+
+	w := bufio.NewWriter(f)
+	enc := json.NewEncoder(w)
+
+	for k, values := range group {
+		enc.Encode(KeyValue{k, reduceF(k, values)})
 	}
 }
