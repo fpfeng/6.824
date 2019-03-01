@@ -4,9 +4,22 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"sort"
 )
 
 type KVArray []struct{ KeyValue }
+
+func (kva KVArray) Len() int {
+	return len(kva)
+}
+
+func (kva KVArray) Swap(i, j int) {
+	kva[i], kva[j] = kva[j], kva[i]
+}
+
+func (kva KVArray) Less(i, j int) bool {
+	return kva[i].Key < kva[j].Key
+}
 
 func doReduce(
 	jobName string, // the name of the whole MapReduce job
@@ -64,4 +77,19 @@ func doReduce(
 	var KVs KVArray
 	err = enc.Decode(&KVs)
 	checkError(err)
+
+	sort.Sort(KVs)
+
+	group := make(map[string][]string)
+
+	for _, kv := range KVs {
+		if group[kv.Key] == nil {
+			group[kv.Key] = make([]string, 0)
+		}
+
+		currentKeyContent := group[kv.Key]
+		currentKeyContent = append(currentKeyContent, kv.Value)
+
+		group[kv.Key] = currentKeyContent
+	}
 }
