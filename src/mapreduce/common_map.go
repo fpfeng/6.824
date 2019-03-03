@@ -79,15 +79,17 @@ func doMap(
 
 	for reduceTask, KVs := range group {
 		intermediateFileName := reduceName(jobName, mapTask, reduceTask)
+		debug("map write %s\n", intermediateFileName)
+		debug("write count %d\n", len(KVs))
 		f, err := os.Create(intermediateFileName)
 		checkError(err)
 		defer f.Close()
 
 		w := bufio.NewWriter(f)
-		defer w.Flush()
 		enc := json.NewEncoder(w)
 		err = enc.Encode(KVs)
 		checkError(err)
+		w.Flush()
 	}
 }
 

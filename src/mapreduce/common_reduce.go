@@ -67,15 +67,20 @@ func doReduce(
 	// Your code here (Part I).
 	//
 
-	intermediateFileName := reduceName(jobName, nMap-1, reduceTask)
-	j, _ := ioutil.ReadFile(intermediateFileName)
-
 	var KVs KVArray
-	json.Unmarshal(j, &KVs)
+	for i := 0; i < nMap; i++ {
+		intermediateFileName := reduceName(jobName, i, reduceTask)
+		j, _ := ioutil.ReadFile(intermediateFileName)
+		debug("reduce read %s\n", intermediateFileName)
+
+		var currentKVs KVArray
+		json.Unmarshal(j, &currentKVs)
+		KVs = append(KVs, currentKVs...)
+	}
 
 	sort.Sort(KVs)
 
-	debug("len: %d\n", len(KVs))
+	debug("read len: %d\n", len(KVs))
 	group := make(map[string][]string)
 
 	for _, kv := range KVs {
@@ -94,10 +99,10 @@ func doReduce(
 	checkError(err)
 
 	w := bufio.NewWriter(f)
-	defer w.Flush()
 	enc := json.NewEncoder(w)
 
 	for k, values := range group {
 		enc.Encode(KeyValue{k, reduceF(k, values)})
 	}
+	w.Flush()
 }
