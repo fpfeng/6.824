@@ -39,16 +39,17 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	var wg sync.WaitGroup
 	for {
 		workerRPCAddr, ok := <-registerChan
+		debug("rpc addr: %s\n", workerRPCAddr)
 		if !ok {
 			break
 		}
 
 		sliceFiles := mapFiles[sliceCount : sliceCount*3] // 没特别意义 随便选的3
 
-		wg.Add(1)
 		go func() {
-			debug("task number: %d\n", sliceCount)
+			debug("task number: %d, rpc: %s\n", sliceCount, workerRPCAddr)
 			for i, taskFile := range sliceFiles {
+				wg.Add(1)
 				taskArg := DoTaskArgs{
 					JobName:       jobName,
 					File:          taskFile,
