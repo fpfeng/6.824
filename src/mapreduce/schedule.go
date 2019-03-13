@@ -11,6 +11,7 @@ import "fmt"
 // suitable for passing to call(). registerChan will yield all
 // existing registered workers (if any) and new ones as they register.
 //
+
 func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, registerChan chan string) {
 	var ntasks int
 	var n_other int // number of inputs (for reduce) or outputs (for map)
@@ -30,5 +31,25 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 	// Your code here (Part III, Part IV).
 	//
+
+	sliceCount := 0
+	taskCount := 0
+	for workerRPCAddr := range registerChan {
+		sliceFiles := mapFiles[sliceCount : sliceCount*3] // 没特别意义 随便选的3
+
+		for _, taskFile := range sliceFiles {
+			taskArg := DoTaskArgs{
+				JobName:       jobName,
+				File:          taskFile,
+				Phase:         phase,
+				TaskNumber:    taskCount,
+				NumOtherPhase: n_other,
+			}
+			go call(workerRPCAddr, "Worker.DoTask", &taskArg, nil)
+			taskCount++
+		}
+		sliceCount++
+	}
+
 	fmt.Printf("Schedule: %v done\n", phase)
 }
