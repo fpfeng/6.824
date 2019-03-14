@@ -2,7 +2,6 @@ package mapreduce
 
 import (
 	"fmt"
-	"sync"
 )
 
 //
@@ -36,33 +35,34 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 
 	sliceCount := 0
-	var wg sync.WaitGroup
-	for {
+	for sliceCount < ntasks {
 		workerRPCAddr, ok := <-registerChan
-		debug("rpc addr: %s\n", workerRPCAddr)
 		if !ok {
+			debug("no more worker, quit")
 			break
 		}
 
-		sliceFiles := mapFiles[sliceCount : sliceCount*3] // 没特别意义 随便选的3
-
-		go func() {
-			debug("task number: %d, rpc: %s\n", sliceCount, workerRPCAddr)
-			for i, taskFile := range sliceFiles {
-				wg.Add(1)
+		func() {
+			c := make(chan int)
+			for i := sliceCount; i < sliceCount+3; i++ {
+				fileName := mapFiles[i]
+				debug("task number: %d, rpc: %s, file: %s\n", i, workerRPCAddr, fileName)
 				taskArg := DoTaskArgs{
 					JobName:       jobName,
-					File:          taskFile,
+					File:          fileName,
 					Phase:         phase,
-					TaskNumber:    i + sliceCount,
+					TaskNumber:    i,
 					NumOtherPhase: n_other,
 				}
-				call(workerRPCAddr, "Worker.DoTask", &taskArg, nil)
+				go func(blockingChan chan int) {
+					call(workerRPCAddr, "Worker.DoTask", &taskArg, nil)
+					blockingChan <- 1
+				}(c)
+				<-c
 			}
 		}()
-		sliceCount++
+		sliceCount += 3
 	}
-	wg.Wait()
 
 	fmt.Printf("Schedule: %v done\n", phase)
 }
