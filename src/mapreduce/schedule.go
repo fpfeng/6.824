@@ -2,7 +2,6 @@ package mapreduce
 
 import (
 	"fmt"
-	"sync"
 )
 
 //
@@ -42,10 +41,8 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 		case workerRPCAddr := <-registerChan:
 			debug("recv rpc addr: %s\n", workerRPCAddr)
 			func() {
-				c := make(chan int)
-				var wg sync.WaitGroup
+				blockingChan := make(chan int)
 				for i := sliceCount; i < sliceCount+3; i++ {
-					wg.Add(1)
 					fileName := mapFiles[i]
 					debug("task number: %d, rpc: %s, file: %s\n", i, workerRPCAddr, fileName)
 					taskArg := DoTaskArgs{
@@ -55,14 +52,12 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 						TaskNumber:    i,
 						NumOtherPhase: n_other,
 					}
-					go func(blockingChan chan int) {
+					go func() {
 						call(workerRPCAddr, "Worker.DoTask", &taskArg, nil)
 						blockingChan <- 1
-					}(c)
-					<-c
+					}()
+					<-blockingChan
 				}
-				wg.Wait()
-				registerChan <- workerRPCAddr
 			}()
 			sliceCount += 3
 		default:
