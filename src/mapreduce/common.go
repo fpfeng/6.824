@@ -12,6 +12,10 @@ const debugEnabled = true
 
 // debug() will only print if debugEnabled is true
 func debug(format string, a ...interface{}) (n int, err error) {
+	if len(format) < 3 || len(a) == 1 { // 扔掉太短的日志
+		return
+	}
+
 	if debugEnabled {
 		n, err = fmt.Printf(format, a...)
 	}

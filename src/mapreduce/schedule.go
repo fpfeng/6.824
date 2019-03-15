@@ -2,6 +2,7 @@ package mapreduce
 
 import (
 	"fmt"
+	"sync"
 )
 
 //
@@ -36,33 +37,38 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 
 	sliceCount := 0
 	for sliceCount < ntasks {
-		workerRPCAddr, ok := <-registerChan
-		if !ok {
-			debug("no more worker, quit")
+		debug("..\n")
+		select {
+		case workerRPCAddr := <-registerChan:
+			debug("recv rpc addr: %s\n", workerRPCAddr)
+			func() {
+				c := make(chan int)
+				var wg sync.WaitGroup
+				for i := sliceCount; i < sliceCount+3; i++ {
+					wg.Add(1)
+					fileName := mapFiles[i]
+					debug("task number: %d, rpc: %s, file: %s\n", i, workerRPCAddr, fileName)
+					taskArg := DoTaskArgs{
+						JobName:       jobName,
+						File:          fileName,
+						Phase:         phase,
+						TaskNumber:    i,
+						NumOtherPhase: n_other,
+					}
+					go func(blockingChan chan int) {
+						call(workerRPCAddr, "Worker.DoTask", &taskArg, nil)
+						blockingChan <- 1
+					}(c)
+					<-c
+				}
+				wg.Wait()
+				registerChan <- workerRPCAddr
+			}()
+			sliceCount += 3
+		default:
 			break
 		}
-
-		func() {
-			c := make(chan int)
-			for i := sliceCount; i < sliceCount+3; i++ {
-				fileName := mapFiles[i]
-				debug("task number: %d, rpc: %s, file: %s\n", i, workerRPCAddr, fileName)
-				taskArg := DoTaskArgs{
-					JobName:       jobName,
-					File:          fileName,
-					Phase:         phase,
-					TaskNumber:    i,
-					NumOtherPhase: n_other,
-				}
-				go func(blockingChan chan int) {
-					call(workerRPCAddr, "Worker.DoTask", &taskArg, nil)
-					blockingChan <- 1
-				}(c)
-				<-c
-			}
-		}()
-		sliceCount += 3
 	}
-
 	fmt.Printf("Schedule: %v done\n", phase)
+	return
 }
