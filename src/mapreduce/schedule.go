@@ -2,6 +2,7 @@ package mapreduce
 
 import (
 	"fmt"
+	"sync"
 )
 
 //
@@ -13,6 +14,12 @@ import (
 // suitable for passing to call(). registerChan will yield all
 // existing registered workers (if any) and new ones as they register.
 //
+
+type SyncTask struct {
+	mu          sync.Mutex
+	tasks       []string
+	taskToDoIdx int
+}
 
 func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, registerChan chan string) {
 	var ntasks int
@@ -34,36 +41,56 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	// Your code here (Part III, Part IV).
 	//
 
-	sliceCount := 0
-	for sliceCount < ntasks {
-		debug("..\n")
+	st := &SyncTask{tasks: mapFiles}
+	for {
+		taskToDoIdx := 0
+		st.mu.Lock()
+		taskToDoIdx = st.taskToDoIdx
+		st.mu.Unlock()
+
+		if taskToDoIdx >= ntasks {
+			break
+		}
+
+		debug("%s for loop.... %d\n", phase, taskToDoIdx)
 		select {
 		case workerRPCAddr := <-registerChan:
-			debug("recv rpc addr: %s\n", workerRPCAddr)
-			func() {
-				blockingChan := make(chan int)
-				for i := sliceCount; i < sliceCount+3; i++ {
-					fileName := mapFiles[i]
-					debug("task number: %d, rpc: %s, file: %s\n", i, workerRPCAddr, fileName)
+			taskToDoIdx := 0
+			var tasks []string
+			st.mu.Lock()
+			taskToDoIdx = st.taskToDoIdx
+			tasks = st.tasks[st.taskToDoIdx : st.taskToDoIdx+3]
+			st.taskToDoIdx += 3
+			st.mu.Unlock()
+
+			debug("all task %s\n", tasks)
+			for i, t := range tasks {
+				block := make(chan int)
+				go func(taskIdx int, fileName string) {
+					debug("%s call worker: %s, file: %s\n", phase, workerRPCAddr, fileName)
 					taskArg := DoTaskArgs{
 						JobName:       jobName,
 						File:          fileName,
 						Phase:         phase,
-						TaskNumber:    i,
+						TaskNumber:    taskIdx,
 						NumOtherPhase: n_other,
 					}
-					go func() {
-						call(workerRPCAddr, "Worker.DoTask", &taskArg, nil)
-						blockingChan <- 1
-					}()
-					<-blockingChan
-				}
+					call(workerRPCAddr, "Worker.DoTask", &taskArg, nil)
+					block <- 1
+				}(taskToDoIdx+i, t)
+				<-block
+			}
+			debug("done current loop job\n")
+			debug("release lock\n")
+			go func() {
+				registerChan <- workerRPCAddr
 			}()
-			sliceCount += 3
+			debug("done put worker back queue\n")
 		default:
 			break
 		}
 	}
+
 	fmt.Printf("Schedule: %v done\n", phase)
 	return
 }
