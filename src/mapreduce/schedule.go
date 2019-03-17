@@ -17,7 +17,6 @@ import (
 
 type SyncTask struct {
 	mu          sync.Mutex
-	tasks       []string
 	taskToDoIdx int
 }
 
@@ -41,7 +40,8 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	// Your code here (Part III, Part IV).
 	//
 
-	st := &SyncTask{tasks: mapFiles}
+	st := &SyncTask{}
+	var wg sync.WaitGroup
 	for {
 		taskToDoIdx := 0
 		st.mu.Lock()
@@ -49,48 +49,52 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 		st.mu.Unlock()
 
 		if taskToDoIdx >= ntasks {
+			debug("break loop\n")
 			break
 		}
 
 		debug("%s for loop.... %d\n", phase, taskToDoIdx)
 		select {
 		case workerRPCAddr := <-registerChan:
-			taskToDoIdx := 0
-			var tasks []string
-			st.mu.Lock()
-			taskToDoIdx = st.taskToDoIdx
-			tasks = st.tasks[st.taskToDoIdx : st.taskToDoIdx+3]
-			st.taskToDoIdx += 3
-			st.mu.Unlock()
-
-			debug("all task %s\n", tasks)
-			for i, t := range tasks {
-				block := make(chan int)
-				go func(taskIdx int, fileName string) {
-					debug("%s call worker: %s, file: %s\n", phase, workerRPCAddr, fileName)
-					taskArg := DoTaskArgs{
-						JobName:       jobName,
-						File:          fileName,
-						Phase:         phase,
-						TaskNumber:    taskIdx,
-						NumOtherPhase: n_other,
-					}
-					call(workerRPCAddr, "Worker.DoTask", &taskArg, nil)
-					block <- 1
-				}(taskToDoIdx+i, t)
-				<-block
-			}
-			debug("done current loop job\n")
-			debug("release lock\n")
+			wg.Add(1)
 			go func() {
-				registerChan <- workerRPCAddr
+				taskToDoIdx := 0
+				var tasks []string
+				st.mu.Lock()
+				taskToDoIdx = st.taskToDoIdx
+				tasks = mapFiles[st.taskToDoIdx : st.taskToDoIdx+5]
+				st.taskToDoIdx += 5
+				st.mu.Unlock()
+
+				debug("all task %s\n", tasks)
+				for i, t := range tasks {
+					func(taskIdx int, fileName string) {
+						debug("%s #%d call worker: %s, file: %s\n", phase, taskIdx, workerRPCAddr, fileName)
+						taskArg := DoTaskArgs{
+							JobName:       jobName,
+							File:          fileName,
+							Phase:         phase,
+							TaskNumber:    taskIdx,
+							NumOtherPhase: n_other,
+						}
+						call(workerRPCAddr, "Worker.DoTask", &taskArg, nil)
+						debug("done call rpc\n")
+					}(taskToDoIdx+i, t)
+				}
+				debug("done current loop job\n")
+				go func() {
+					registerChan <- workerRPCAddr
+					debug("done put worker back queue\n")
+				}()
+				wg.Done()
 			}()
-			debug("done put worker back queue\n")
 		default:
 			break
 		}
 	}
 
+	debug("wait all worker\n")
+	wg.Wait()
 	fmt.Printf("Schedule: %v done\n", phase)
 	return
 }
