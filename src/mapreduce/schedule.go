@@ -66,8 +66,8 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 				var tasks []string
 				st.mu.Lock()
 				taskToDoIdx = st.taskToDoIdx
-				tasks = mapFiles[st.taskToDoIdx : st.taskToDoIdx+5]
-				st.taskToDoIdx += 5
+				tasks = mapFiles[st.taskToDoIdx : st.taskToDoIdx+2]
+				st.taskToDoIdx += 2
 				st.mu.Unlock()
 
 				debug("all task %s\n", tasks)
@@ -89,33 +89,33 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 					}
 				}
 
-				if true {
-					var failTask map[int]string
-					st.mu.Lock()
-					failTask = st.failTask
-					st.mu.Unlock()
+				var failTask map[int]string
+				st.mu.Lock()
+				failTask = st.failTask
+				st.mu.Unlock()
 
-					debug("fail tasks: %s\n", failTask)
-					for i, failName := range failTask {
-						debug("retry fail task #%d %s\n", i, failName)
-						taskArg := DoTaskArgs{
-							JobName:       jobName,
-							File:          failName,
-							Phase:         phase,
-							TaskNumber:    i,
-							NumOtherPhase: n_other,
-						}
-						isSuccess := callWorker(&taskArg, workerRPCAddr)
-						if isSuccess {
-							st.mu.Lock()
-							delete(st.failTask, i)
-							st.mu.Unlock()
-							debug("%s remove fail #%d %s\n", phase, i, failName)
-						}
-					}
-					debug("done current loop job\n")
-
+				for k, v := range failTask {
+					debug("%s failtask #%d %s\n", phase, k, v)
 				}
+				for i, failName := range failTask {
+					debug("retry fail task #%d %s\n", i, failName)
+					taskArg := DoTaskArgs{
+						JobName:       jobName,
+						File:          failName,
+						Phase:         phase,
+						TaskNumber:    i,
+						NumOtherPhase: n_other,
+					}
+					isSuccess := callWorker(&taskArg, workerRPCAddr)
+					if isSuccess {
+						st.mu.Lock()
+						delete(st.failTask, i)
+						st.mu.Unlock()
+						debug("%s remove fail #%d %s\n", phase, i, failName)
+					}
+				}
+				debug("done current loop job\n")
+
 				go func() {
 					var failWorker map[string]int
 					st.mu.Lock()
