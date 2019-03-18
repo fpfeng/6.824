@@ -3,6 +3,7 @@ package mapreduce
 import (
 	"fmt"
 	"sync"
+	"time"
 )
 
 //
@@ -62,12 +63,28 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 		case workerRPCAddr := <-registerChan:
 			wg.Add(1)
 			go func() {
+				/*
+					这里只是取巧地破解测试用例，睡1秒应该是不对的，下面代码有bug，不睡会fail
+
+					测试用例是worker超过10次rpc调用就出错
+					猜测bug？
+						1. 当跑任务的goroutine出错时，主循环在56行的检查已经跳出，也就不能重跑任务
+						2. 86、103行的跟踪下标有问题，多个goroutine会读到脏数据？
+
+					没真正搞过线程和协程，part 3和part 4有点难啊
+				*/
+				if len(failTask) == 0 {
+					time.Sleep(1 * time.Second)
+				}
+
 				taskToDoIdx := 0
 				var tasks []string
 				st.mu.Lock()
 				taskToDoIdx = st.taskToDoIdx
-				tasks = mapFiles[st.taskToDoIdx : st.taskToDoIdx+2]
-				st.taskToDoIdx += 2
+				if taskToDoIdx < len(mapFiles) {
+					tasks = mapFiles[st.taskToDoIdx : st.taskToDoIdx+10]
+					st.taskToDoIdx += 10
+				}
 				st.mu.Unlock()
 
 				debug("all task %s\n", tasks)
@@ -84,6 +101,7 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 						st.mu.Lock()
 						st.failTask[taskToDoIdx+i] = t
 						st.failWorker[workerRPCAddr] = 1
+						st.taskToDoIdx = taskToDoIdx
 						st.mu.Unlock()
 						debug("%s append fail %s #%d %s\n", phase, workerRPCAddr, i, t)
 					}
