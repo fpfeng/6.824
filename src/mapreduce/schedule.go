@@ -68,18 +68,16 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 
 				debug("all task %s\n", tasks)
 				for i, t := range tasks {
-					func(taskIdx int, fileName string) {
-						debug("%s #%d call worker: %s, file: %s\n", phase, taskIdx, workerRPCAddr, fileName)
-						taskArg := DoTaskArgs{
-							JobName:       jobName,
-							File:          fileName,
-							Phase:         phase,
-							TaskNumber:    taskIdx,
-							NumOtherPhase: n_other,
-						}
-						call(workerRPCAddr, "Worker.DoTask", &taskArg, nil)
-						debug("done call rpc\n")
-					}(taskToDoIdx+i, t)
+					debug("%s #%d call worker: %s, file: %s\n", phase, taskToDoIdx+i, workerRPCAddr, t)
+					taskArg := DoTaskArgs{
+						JobName:       jobName,
+						File:          t,
+						Phase:         phase,
+						TaskNumber:    taskToDoIdx + i,
+						NumOtherPhase: n_other,
+					}
+					call(workerRPCAddr, "Worker.DoTask", &taskArg, nil)
+					debug("done call rpc\n")
 				}
 				debug("done current loop job\n")
 				go func() {
