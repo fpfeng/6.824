@@ -18,6 +18,8 @@ import (
 type SyncTask struct {
 	mu          sync.Mutex
 	taskToDoIdx int
+	failTask    map[int]string
+	failWorker  map[string]int
 }
 
 func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, registerChan chan string) {
@@ -40,15 +42,17 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	// Your code here (Part III, Part IV).
 	//
 
-	st := &SyncTask{}
+	st := &SyncTask{failTask: make(map[int]string), failWorker: make(map[string]int)}
 	var wg sync.WaitGroup
 	for {
 		taskToDoIdx := 0
+		var failTask map[int]string
 		st.mu.Lock()
 		taskToDoIdx = st.taskToDoIdx
+		failTask = st.failTask
 		st.mu.Unlock()
 
-		if taskToDoIdx >= ntasks {
+		if taskToDoIdx >= ntasks && len(failTask) == 0 {
 			debug("break loop\n")
 			break
 		}
@@ -68,7 +72,6 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 
 				debug("all task %s\n", tasks)
 				for i, t := range tasks {
-					debug("%s #%d call worker: %s, file: %s\n", phase, taskToDoIdx+i, workerRPCAddr, t)
 					taskArg := DoTaskArgs{
 						JobName:       jobName,
 						File:          t,
@@ -76,13 +79,54 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 						TaskNumber:    taskToDoIdx + i,
 						NumOtherPhase: n_other,
 					}
-					call(workerRPCAddr, "Worker.DoTask", &taskArg, nil)
-					debug("done call rpc\n")
+					isSuccess := callWorker(&taskArg, workerRPCAddr)
+					if !isSuccess {
+						st.mu.Lock()
+						st.failTask[taskToDoIdx+i] = t
+						st.failWorker[workerRPCAddr] = 1
+						st.mu.Unlock()
+						debug("%s append fail %s #%d %s\n", phase, workerRPCAddr, i, t)
+					}
 				}
-				debug("done current loop job\n")
+
+				if true {
+					var failTask map[int]string
+					st.mu.Lock()
+					failTask = st.failTask
+					st.mu.Unlock()
+
+					debug("fail tasks: %s\n", failTask)
+					for i, failName := range failTask {
+						debug("retry fail task #%d %s\n", i, failName)
+						taskArg := DoTaskArgs{
+							JobName:       jobName,
+							File:          failName,
+							Phase:         phase,
+							TaskNumber:    i,
+							NumOtherPhase: n_other,
+						}
+						isSuccess := callWorker(&taskArg, workerRPCAddr)
+						if isSuccess {
+							st.mu.Lock()
+							delete(st.failTask, i)
+							st.mu.Unlock()
+							debug("%s remove fail #%d %s\n", phase, i, failName)
+						}
+					}
+					debug("done current loop job\n")
+
+				}
 				go func() {
-					registerChan <- workerRPCAddr
-					debug("done put worker back queue\n")
+					var failWorker map[string]int
+					st.mu.Lock()
+					failWorker = st.failWorker
+					st.mu.Unlock()
+
+					if _, exists := failWorker[workerRPCAddr]; exists {
+						debug("%s skip put %s back queue\n", phase, workerRPCAddr)
+					} else {
+						registerChan <- workerRPCAddr
+					}
 				}()
 				wg.Done()
 			}()
@@ -95,4 +139,11 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	wg.Wait()
 	fmt.Printf("Schedule: %v done\n", phase)
 	return
+}
+
+func callWorker(taskArg *DoTaskArgs, workerAddr string) bool {
+	debug("%s #%d call worker: %s, file: %s\n", taskArg.Phase, taskArg.TaskNumber, workerAddr, taskArg.File)
+	result := call(workerAddr, "Worker.DoTask", &taskArg, nil)
+	debug("done call rpc\n")
+	return result
 }
