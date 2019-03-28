@@ -45,6 +45,14 @@ type LogEntry struct {
 	Term    int
 }
 
+type RaftState int
+
+const (
+	Follower RaftState = iota
+	Candidate
+	Leader
+)
+
 //
 // A Go object implementing a single Raft peer.
 //
@@ -58,10 +66,11 @@ type Raft struct {
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
-	// 所有服务器固定存在
+	// 所有服务器固定存在/
 	currentTerm int
 	votedFor    int
 	log         []*LogEntry
+	state       RaftState
 
 	// 所有服务器经常改变
 	commitIndex int
@@ -147,6 +156,33 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+
+	currentTerm := 0
+	votedFor := 0
+	logLength := 0
+	rf.mu.Lock()
+	currentTerm = rf.currentTerm
+	votedFor = rf.votedFor
+	logLength = len(rf.log)
+	rf.mu.Unlock()
+
+	voteGranted := false
+	if args.Term >= currentTerm {
+		voteGranted = true
+	}
+
+	voteGranted = voteGranted && (votedFor == 0 || votedFor == args.CandidateID) && args.LastLogIndex >= logLength
+
+	if voteGranted {
+		reply.Term = currentTerm
+		reply.VoteGranted = true
+
+		rf.mu.Lock()
+		rf.votedFor = args.CandidateID
+		rf.mu.Unlock()
+	}
+
+	return
 }
 
 //
