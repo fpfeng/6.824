@@ -151,6 +151,15 @@ type RequestVoteReply struct {
 	VoteGranted bool
 }
 
+func (rf *Raft) checkTermSwitchFollower(term) {
+	rf.mu.Lock()
+	if term > rf.currentTerm {
+		rf.currentTerm = term
+		rf.state = Follower
+	}
+	rf.mu.Unlock()
+}
+
 //
 // example RequestVote RPC handler.
 //
@@ -182,6 +191,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.mu.Unlock()
 	}
 
+	rf.checkTermSwitchFollower(args.Term)
 	return
 }
 
