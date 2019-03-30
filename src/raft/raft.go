@@ -66,7 +66,7 @@ type Raft struct {
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
-	// 所有服务器固定存在/
+	// 所有服务器固定存在
 	currentTerm int
 	votedFor    int
 	log         []*LogEntry
@@ -88,6 +88,10 @@ func (rf *Raft) GetState() (int, bool) {
 	var term int
 	var isleader bool
 	// Your code here (2A).
+	rf.mu.Lock()
+	term = rf.currentTerm
+	isleader = rf.state == Leader
+	rf.mu.Unlock()
 	return term, isleader
 }
 
@@ -151,7 +155,7 @@ type RequestVoteReply struct {
 	VoteGranted bool
 }
 
-func (rf *Raft) checkTermSwitchFollower(term) {
+func (rf *Raft) checkTermSwitchFollower(term int) {
 	rf.mu.Lock()
 	if term > rf.currentTerm {
 		rf.currentTerm = term
