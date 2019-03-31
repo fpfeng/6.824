@@ -159,7 +159,7 @@ type AppendEntriesArgs struct {
 	Term         int
 	LeaderID     int
 	PrevLogIndex int
-	PreLogTerm   int
+	PrevLogTerm  int
 	Entries      []*LogEntry
 	LeaderCommit int
 }
