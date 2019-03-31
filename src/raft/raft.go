@@ -170,10 +170,35 @@ type AppendEntriesReply struct {
 }
 
 func (rf *Raft) checkTermSwitchFollower(term int) {
+	/*
+		If RPC request or response contains term T > currentTerm:
+		set currentTerm = T, convert to follower (§5.1)
+	*/
 	rf.mu.Lock()
 	if term > rf.currentTerm {
 		rf.currentTerm = term
 		rf.state = Follower
+	}
+	rf.mu.Unlock()
+}
+
+func (rf *Raft) initNextIndexAndMatchIndex() {
+	/*
+		(Reinitialized after election)
+		nextIndex[] for each server, index of the next log entry
+		to send to that server (initialized to leader
+		last log index + 1)
+		matchIndex[] for each server, index of highest log entry
+		known to be replicated on server
+		(initialized to 0, increases monotonically)
+	*/
+	rf.mu.Lock()
+	for i := range rf.peers {
+		if i == rf.me {
+			continue
+		}
+		rf.nextIndex[i] = len(rf.log)
+		rf.matchIndex[i] = 0
 	}
 	rf.mu.Unlock()
 }
@@ -183,6 +208,7 @@ func (rf *Raft) checkTermSwitchFollower(term int) {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+	rf.checkTermSwitchFollower(args.Term)
 
 	var currentTerm int
 	var votedFor int
@@ -221,7 +247,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.mu.Unlock()
 	}
 
-	rf.checkTermSwitchFollower(args.Term)
 	return
 }
 
@@ -256,11 +281,33 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 //
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
+
+	if ok {
+		rf.checkTermSwitchFollower(reply.Term)
+	}
 	return ok
+}
+
+func AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	/*
+	   1. Reply false if term < currentTerm (§5.1)
+	   2. Reply false if log doesn’t contain an entry at prevLogIndex
+	   whose term matches prevLogTerm (§5.3)
+	   3. If an existing entry conflicts with a new one (same index
+	   but different terms), delete the existing entry and all that
+	   follow it (§5.3)
+	   4. Append any new entries not already in the log
+	   5. If leaderCommit > commitIndex, set commitIndex =
+	   min(leaderCommit, index of last new entry)
+	*/
+	type currentTerm int
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	if ok {
+		rf.checkTermSwitchFollower(reply.Term)
+	}
 	return ok
 }
 
