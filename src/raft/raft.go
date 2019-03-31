@@ -288,19 +288,38 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok
 }
 
-func AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	/*
-	   1. Reply false if term < currentTerm (§5.1)
-	   2. Reply false if log doesn’t contain an entry at prevLogIndex
-	   whose term matches prevLogTerm (§5.3)
-	   3. If an existing entry conflicts with a new one (same index
-	   but different terms), delete the existing entry and all that
-	   follow it (§5.3)
-	   4. Append any new entries not already in the log
-	   5. If leaderCommit > commitIndex, set commitIndex =
-	   min(leaderCommit, index of last new entry)
+		1. Reply false if term < currentTerm (§5.1)
+		2. Reply false if log doesn’t contain an entry at prevLogIndex
+		whose term matches prevLogTerm (§5.3)
+		3. If an existing entry conflicts with a new one (same index
+		but different terms), delete the existing entry and all that
+		follow it (§5.3)
+		4. Append any new entries not already in the log
+		5. If leaderCommit > commitIndex, set commitIndex =
+		min(leaderCommit, index of last new entry)
 	*/
-	type currentTerm int
+	rf.mu.Unlock()
+	reply.Term = rf.currentTerm
+
+	if args.Term < rf.currentTerm {
+		rf.mu.Unlock()
+		reply.Success = false
+		return
+	}
+
+	isPrevTermMatchs := false
+	isLogLengthOk := len(rf.log) > args.PrevLogIndex
+	if isLogLengthOk {
+		isPrevTermMatchs = rf.log[args.PrevLogIndex].Term == args.PrevLogTerm
+	}
+
+	if !isPrevTermMatchs {
+		rf.mu.Unlock()
+		reply.Success = false
+		return
+	}
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
