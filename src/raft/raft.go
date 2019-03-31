@@ -170,21 +170,33 @@ func (rf *Raft) checkTermSwitchFollower(term int) {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 
-	currentTerm := 0
-	votedFor := 0
-	logLength := 0
+	var currentTerm int
+	var votedFor int
+	var logLength int
+	var lastLogTerm int
 	rf.mu.Lock()
 	currentTerm = rf.currentTerm
 	votedFor = rf.votedFor
 	logLength = len(rf.log)
+	lastLogTerm = rf.log[logLength-1].Term
 	rf.mu.Unlock()
 
-	voteGranted := false
-	if args.Term >= currentTerm {
-		voteGranted = true
-	}
+	/*
+		1. Reply false if term < currentTerm (§5.1)
+		2. If votedFor is null or candidateId, and candidate’s log is at
+		least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
 
-	voteGranted = voteGranted && (votedFor == 0 || votedFor == args.CandidateID) && args.LastLogIndex >= logLength
+		Raft determines which of two logs is more up-to-date
+		by comparing the index and term of the last entries in the
+		logs. If the logs have last entries with different terms, then
+		the log with the later term is more up-to-date. If the logs
+		end with the same term, then whichever log is longer is
+		more up-to-date.
+	*/
+	voteGranted := false
+	isLargeThanCurrentTerm := args.Term > currentTerm
+	isLogUpTodate := args.LastLogTerm == lastLogTerm && args.LastLogIndex >= logLength-1
+	voteGranted = (votedFor == 0 || votedFor == args.CandidateID) && isLargeThanCurrentTerm && isLogUpTodate
 
 	if voteGranted {
 		reply.Term = currentTerm
@@ -284,6 +296,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
+	rf.log = make([]*LogEntry, 0)
 
 	// Your initialization code here (2A, 2B, 2C).
 
