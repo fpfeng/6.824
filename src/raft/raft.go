@@ -17,8 +17,10 @@ package raft
 //   in the same server.
 //
 
-import "sync"
-import "labrpc"
+import (
+	"labrpc"
+	"sync"
+)
 
 // import "bytes"
 // import "labgob"
@@ -327,16 +329,37 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		isPrevTermMatchs = rf.log[args.PrevLogIndex].Term == args.PrevLogTerm
 	}
 
-	if !isPrevTermMatchs {
+	if !isLogLengthOk || !isPrevTermMatchs {
 		rf.mu.Unlock()
 		reply.Success = false
 		return
 	}
 
+	reply.Success = true
+
 	rf.deleteConflictEntries(args.PrevLogIndex+1, args.Entries[0])
+	if len(args.Entries) > 0 {
+		// Append any new entries not already in the log 这里感觉不对
+		rf.log = append(rf.log, args.Entries...)
+	}
 
+	if args.LeaderCommit > rf.commitIndex {
+		/*
+			5. If leaderCommit > commitIndex, set commitIndex =
+			min(leaderCommit, index of last new entry)
+		*/
+		var min int
+		lastNewEntryIndex := args.PrevLogIndex + len(args.Entries)
+
+		if args.LeaderCommit < lastNewEntryIndex {
+			min = args.LeaderCommit
+		} else {
+			min = lastNewEntryIndex
+		}
+		rf.commitIndex = min
+	}
 	rf.mu.Unlock()
-
+	return
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
