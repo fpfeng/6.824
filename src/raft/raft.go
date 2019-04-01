@@ -288,6 +288,17 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok
 }
 
+func (rf *Raft) deleteConflictEntries(newEntryIndex int, newEntry *LogEntry) {
+	/*
+		3. If an existing entry conflicts with a new one (same index
+		but different terms), delete the existing entry and all that
+		follow it (§5.3)
+	*/
+	if rf.log[newEntryIndex].Term != newEntry.Term {
+		rf.log = rf.log[:newEntryIndex]
+	}
+}
+
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	/*
 		1. Reply false if term < currentTerm (§5.1)
@@ -300,7 +311,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		5. If leaderCommit > commitIndex, set commitIndex =
 		min(leaderCommit, index of last new entry)
 	*/
-	rf.mu.Unlock()
+	rf.mu.Lock()
+
 	reply.Term = rf.currentTerm
 
 	if args.Term < rf.currentTerm {
@@ -320,6 +332,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Success = false
 		return
 	}
+
+	rf.deleteConflictEntries(args.PrevLogIndex+1, args.Entries[0])
+
+	rf.mu.Unlock()
+
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
