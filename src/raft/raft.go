@@ -19,7 +19,9 @@ package raft
 
 import (
 	"labrpc"
+	"math/rand"
 	"sync"
+	"time"
 )
 
 // import "bytes"
@@ -69,10 +71,11 @@ type Raft struct {
 	// state a Raft server must maintain.
 
 	// 所有服务器固定存在
-	currentTerm int
-	votedFor    int
-	log         []*LogEntry
-	state       RaftState
+	currentTerm     int
+	votedFor        int
+	log             []*LogEntry
+	state           RaftState
+	stepAsCandidate bool // reset false when receive heartbeat rpc
 
 	// 所有服务器经常改变
 	commitIndex int
@@ -424,7 +427,32 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.log = make([]*LogEntry, 0)
 
 	// Your initialization code here (2A, 2B, 2C).
+	go func() {
+		for {
+			var currentState RaftState
+			var stepAsCandidate bool
+			rf.mu.Lock()
+			currentState = rf.state
+			stepAsCandidate = rf.stepAsCandidate
+			rf.mu.Unlock()
 
+			switch currentState {
+			case Follower:
+				if stepAsCandidate {
+					rf.startVote()
+				} else {
+					rf.mu.Lock()
+					rf.stepAsCandidate = true
+					rf.mu.Unlock()
+
+					// [350, 500]
+					// https://stackoverflow.com/questions/23577091/generating-random-numbers-over-a-range-in-go
+					t := rand.Intn(500-350) + 350
+					time.Sleep(t * time.Millisecond)
+				}
+			}
+		}
+	}()
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
