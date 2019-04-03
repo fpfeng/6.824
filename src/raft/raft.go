@@ -338,6 +338,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
+	rf.stepAsCandidate = false
 	reply.Success = true
 
 	rf.deleteConflictEntries(args.PrevLogIndex+1, args.Entries[0])
@@ -397,6 +398,10 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	return index, term, isLeader
 }
 
+func (rf *Raft) startsElection() {
+
+}
+
 //
 // the tester calls Kill() when a Raft instance won't
 // be needed again. you are not required to do anything
@@ -439,7 +444,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			switch currentState {
 			case Follower:
 				if stepAsCandidate {
-					rf.startVote()
+					rf.startsElection()
 				} else {
 					rf.mu.Lock()
 					rf.stepAsCandidate = true
@@ -448,7 +453,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					// [350, 500]
 					// https://stackoverflow.com/questions/23577091/generating-random-numbers-over-a-range-in-go
 					t := rand.Intn(500-350) + 350
-					time.Sleep(t * time.Millisecond)
+					time.Sleep(time.Duration(t) * time.Millisecond)
 				}
 			}
 		}
