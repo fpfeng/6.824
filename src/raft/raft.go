@@ -240,7 +240,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	*/
 	voteGranted := false
 	isLargeThanCurrentTerm := args.Term > currentTerm
-	isLogUpTodate := args.LastLogTerm == lastLogTerm && args.LastLogIndex >= logLength-1
+	isLogUpTodate := args.LastLogTerm == lastLogTerm && args.LastLogIndex >= logLength
 	voteGranted = (votedFor == 0 || votedFor == args.CandidateID) && isLargeThanCurrentTerm && isLogUpTodate
 
 	if voteGranted {
