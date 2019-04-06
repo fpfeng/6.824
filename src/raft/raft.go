@@ -18,6 +18,7 @@ package raft
 //
 
 import (
+	"fmt"
 	"labrpc"
 	"math/rand"
 	"sync"
@@ -87,6 +88,11 @@ type Raft struct {
 	// 领导状态才改变的
 	nextIndex  map[int]int
 	matchIndex map[int]int
+}
+
+func (rf *Raft) debugLog(format string, a ...interface{}) (n int, err error) {
+	format = fmt.Sprintf("\033[38;5;%dmS%d \033[39;49m", rf.me+10, rf.me) + format
+	return DPrintf(format, a...)
 }
 
 // return currentTerm and whether this server
@@ -517,6 +523,7 @@ func (rf *Raft) Kill() {
 // Make() must return quickly, so it should start goroutines
 // for any long-running work.
 //
+
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
@@ -528,7 +535,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Your initialization code here (2A, 2B, 2C).
 	go func() {
 		for {
-			DPrintf("node #%d", rf.me)
 			var currentState RaftState
 			var stepAsCandidate bool
 			rf.mu.Lock()
@@ -536,12 +542,14 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			stepAsCandidate = rf.stepAsCandidate
 			rf.mu.Unlock()
 
+			rf.debugLog("current state: %d", currentState)
 			switch currentState {
 			case Follower:
 				if !stepAsCandidate {
 					rf.mu.Lock()
 					rf.stepAsCandidate = true
 					rf.mu.Unlock()
+					rf.debugLog("step as candidate")
 
 					// [350, 500]
 					// https://stackoverflow.com/questions/23577091/generating-random-numbers-over-a-range-in-go
@@ -557,6 +565,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				t := rand.Intn(200-150) + 200
 				time.Sleep(time.Duration(t) * time.Millisecond)
 			}
+			break
 		}
 	}()
 	// initialize from state persisted before a crash
