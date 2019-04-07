@@ -212,6 +212,8 @@ func (rf *Raft) initNextIndexAndMatchIndex() {
 		(initialized to 0, increases monotonically)
 	*/
 	rf.mu.Lock()
+	rf.nextIndex = make(map[int]int)
+	rf.matchIndex = make(map[int]int)
 	for i := range rf.peers {
 		if i == rf.me {
 			continue
@@ -227,7 +229,6 @@ func (rf *Raft) initNextIndexAndMatchIndex() {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
-	rf.checkTermSwitchFollower(args.Term)
 
 	var currentTerm int
 	var votedFor int
@@ -237,9 +238,14 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	rf.mu.Lock()
 	currentTerm = rf.currentTerm
+	rf.debugLog("request vote current term: %d", currentTerm)
 	votedFor = rf.votedFor
 	logLength = len(rf.log)
-	lastLogTerm = rf.log[logLength-1].Term
+	if logLength > 0 {
+		lastLogTerm = rf.log[logLength-1].Term
+	} else {
+		lastLogTerm = 0
+	}
 
 	if _, exists := rf.termVotedFor[args.Term]; exists {
 		isTermNotVoted = false
@@ -261,9 +267,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	*/
 	voteGranted := false
 	isLargeThanCurrentTerm := args.Term > currentTerm
-	isLogUpTodate := args.LastLogTerm > lastLogTerm && args.LastLogIndex > logLength-1
-
-	voteGranted = (votedFor == 0 || votedFor == args.CandidateID) && isLargeThanCurrentTerm && isLogUpTodate && isTermNotVoted
+	isLogUpToDate := args.LastLogTerm >= lastLogTerm && args.LastLogIndex > logLength-1
+	rf.debugLog("candidate%d: [term: %d last index: %d last term: %d] current term: %d, last index:%d", args.CandidateID, args.Term, args.LastLogIndex, args.LastLogTerm, currentTerm, logLength-1)
+	rf.debugLog("candidate%d: args.LastLogTerm >= lastLogTerm: %t, args.LastLogIndex > logLength-1: %t", rf.me, args.LastLogTerm >= lastLogTerm, args.LastLogIndex > logLength-1)
+	rf.debugLog("candidate%d: isLargeThanCurrentTerm: %t, isLogUptoDate: %t", args.CandidateID, isLargeThanCurrentTerm, isLogUpToDate)
+	voteGranted = (votedFor == 0 || votedFor == args.CandidateID) && isLargeThanCurrentTerm && isLogUpToDate && isTermNotVoted
 
 	if voteGranted {
 		reply.Term = currentTerm
@@ -275,6 +283,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.mu.Unlock()
 	}
 
+	rf.checkTermSwitchFollower(args.Term)
 	return
 }
 
@@ -450,6 +459,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 }
 
 func (rf *Raft) stepAsLeader() {
+	rf.debugLog("******* step as leader *******")
 	rf.mu.Lock()
 	rf.state = Leader
 	rf.mu.Unlock()
@@ -468,6 +478,7 @@ func (rf *Raft) startsElection() {
 		follower
 		• If election timeout elapses: start new election
 	*/
+	rf.debugLog("start election")
 	rva := RequestVoteArgs{CandidateID: rf.me}
 	getVotedCount := 1
 
@@ -477,11 +488,15 @@ func (rf *Raft) startsElection() {
 	rf.currentTerm++
 	rf.votedFor = rf.me
 	rva.Term = rf.currentTerm
-	rva.LastLogIndex = len(rf.log) - 1
+	if len(rf.log) > 0 {
+		rva.LastLogIndex = len(rf.log) - 1
+		rva.LastLogTerm = rf.log[rva.LastLogIndex].Term
+	} else {
+		rva.LastLogIndex = 0
+		rva.LastLogTerm = 0
+	}
 	currentTerm = rf.currentTerm
 	rf.mu.Unlock()
-
-	rva.LastLogTerm = rf.log[rva.LastLogIndex].Term
 
 	for idx := range rf.peers {
 		if idx == rf.me {
@@ -490,10 +505,10 @@ func (rf *Raft) startsElection() {
 
 		rvr := RequestVoteReply{}
 		isOk := rf.sendRequestVote(idx, &rva, &rvr)
-
-		if isOk && rvr.Term == currentTerm && rvr.VoteGranted {
+		rf.debugLog("s%d vote reply: [grant: %t term: %d], isOk: %t current term: %d", idx, rvr.VoteGranted, rvr.Term, isOk, currentTerm)
+		if isOk && rvr.VoteGranted {
 			getVotedCount++
-			if getVotedCount > len(rf.peers) {
+			if getVotedCount > len(rf.peers)/2 {
 				rf.stepAsLeader()
 				break
 			}
@@ -531,6 +546,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 	rf.log = make([]*LogEntry, 0)
+	rf.termVotedFor = make(map[int]int)
 
 	// Your initialization code here (2A, 2B, 2C).
 	go func() {
@@ -549,23 +565,28 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					rf.mu.Lock()
 					rf.stepAsCandidate = true
 					rf.mu.Unlock()
-					rf.debugLog("step as candidate")
-
 					// [350, 500]
 					// https://stackoverflow.com/questions/23577091/generating-random-numbers-over-a-range-in-go
 					t := rand.Intn(500-350) + 350
 					time.Sleep(time.Duration(t) * time.Millisecond)
+					rf.debugLog("follower awake")
+				} else {
+					rf.mu.Lock()
+					rf.state = Candidate
+					rf.mu.Unlock()
+					rf.debugLog("step as candidate")
 				}
 			case Candidate:
+
 				rf.startsElection()
 				t := rand.Intn(600-550) + 550
 				time.Sleep(time.Duration(t) * time.Millisecond)
 			case Leader:
 				rf.sendHeartbeat()
-				t := rand.Intn(200-150) + 200
+				t := rand.Intn(50) + 50
 				time.Sleep(time.Duration(t) * time.Millisecond)
 			}
-			break
+			rf.debugLog("end loop")
 		}
 	}()
 	// initialize from state persisted before a crash
