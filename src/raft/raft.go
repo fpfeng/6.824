@@ -376,8 +376,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
+	rf.stepAsCandidate = false
 	rf.mu.Unlock()
-	rf.debugLog("append enties [log length: %d]", len(rf.log))
+	rf.debugLog("pass append enties pre-check [log length: %d]", len(rf.log))
 	rf.checkTermSwitchFollower(args.Term)
 	reply.Success = true
 
@@ -404,6 +405,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.commitIndex = min
 	}
 	rf.mu.Unlock()
+	rf.debugLog("done append enties")
 	return
 }
 
@@ -578,7 +580,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					rf.mu.Unlock()
 					// [350, 500]
 					// https://stackoverflow.com/questions/23577091/generating-random-numbers-over-a-range-in-go
-					t := rand.Intn(300) + 1200
+					t := rand.Intn(300) + 900
 					time.Sleep(time.Duration(t) * time.Millisecond)
 					rf.debugLog("follower awake")
 				} else {
@@ -593,7 +595,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				time.Sleep(time.Duration(t) * time.Millisecond)
 			case Leader:
 				rf.sendHeartbeat()
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(110 * time.Millisecond)
 				rf.debugLog("leader awake")
 			}
 			rf.debugLog("end loop")
