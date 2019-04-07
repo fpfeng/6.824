@@ -194,7 +194,9 @@ func (rf *Raft) checkTermSwitchFollower(term int) bool {
 	if term > rf.currentTerm {
 		rf.currentTerm = term
 		rf.state = Follower
+		rf.stepAsCandidate = false
 		isNotSwitch = false
+		rf.debugLog("reset to follower")
 	}
 	rf.mu.Unlock()
 
@@ -269,7 +271,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	isLargeThanCurrentTerm := args.Term > currentTerm
 	isLogUpToDate := args.LastLogTerm >= lastLogTerm && args.LastLogIndex > logLength-1
 	rf.debugLog("candidate%d: [term: %d last index: %d last term: %d] current term: %d, last index:%d", args.CandidateID, args.Term, args.LastLogIndex, args.LastLogTerm, currentTerm, logLength-1)
-	rf.debugLog("candidate%d: args.LastLogTerm >= lastLogTerm: %t, args.LastLogIndex > logLength-1: %t", rf.me, args.LastLogTerm >= lastLogTerm, args.LastLogIndex > logLength-1)
+	rf.debugLog("candidate%d: args.LastLogTerm >= lastLogTerm: %t, args.LastLogIndex > logLength-1: %t", args.CandidateID, args.LastLogTerm >= lastLogTerm, args.LastLogIndex > logLength-1)
 	rf.debugLog("candidate%d: isLargeThanCurrentTerm: %t, isLogUptoDate: %t", args.CandidateID, isLargeThanCurrentTerm, isLogUpToDate)
 	voteGranted = (votedFor == 0 || votedFor == args.CandidateID) && isLargeThanCurrentTerm && isLogUpToDate && isTermNotVoted
 
@@ -374,9 +376,12 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
-	rf.stepAsCandidate = false
+	rf.mu.Unlock()
+	rf.debugLog("append enties [log length: %d]", len(rf.log))
+	rf.checkTermSwitchFollower(args.Term)
 	reply.Success = true
 
+	rf.mu.Lock()
 	rf.deleteConflictEntries(args.PrevLogIndex+1, args.Entries)
 	if len(args.Entries) > 0 {
 		// Append any new entries not already in the log 这里感觉不对
@@ -443,6 +448,10 @@ func (rf *Raft) sendHeartbeat() {
 	rf.mu.Unlock()
 
 	for idx := range rf.peers {
+		if idx == rf.me {
+			continue
+		}
+
 		aer := AppendEntriesReply{}
 		rf.sendAppendEntries(idx, &aea, &aer)
 	}
@@ -464,6 +473,7 @@ func (rf *Raft) stepAsLeader() {
 	rf.state = Leader
 	rf.mu.Unlock()
 	rf.initNextIndexAndMatchIndex()
+	rf.sendHeartbeat()
 }
 
 func (rf *Raft) startsElection() {
@@ -487,6 +497,7 @@ func (rf *Raft) startsElection() {
 	rf.mu.Lock()
 	rf.currentTerm++
 	rf.votedFor = rf.me
+	rf.termVotedFor[rf.currentTerm] = rf.me
 	rva.Term = rf.currentTerm
 	if len(rf.log) > 0 {
 		rva.LastLogIndex = len(rf.log) - 1
@@ -505,7 +516,7 @@ func (rf *Raft) startsElection() {
 
 		rvr := RequestVoteReply{}
 		isOk := rf.sendRequestVote(idx, &rva, &rvr)
-		rf.debugLog("s%d vote reply: [grant: %t term: %d], isOk: %t current term: %d", idx, rvr.VoteGranted, rvr.Term, isOk, currentTerm)
+		rf.debugLog("follower%d vote reply: [grant: %t term: %d], isOk: %t current term: %d", idx, rvr.VoteGranted, rvr.Term, isOk, currentTerm)
 		if isOk && rvr.VoteGranted {
 			getVotedCount++
 			if getVotedCount > len(rf.peers)/2 {
@@ -558,7 +569,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			stepAsCandidate = rf.stepAsCandidate
 			rf.mu.Unlock()
 
-			rf.debugLog("current state: %d", currentState)
+			rf.debugLog("current state: %d stepAsCandidate: %t", currentState, stepAsCandidate)
 			switch currentState {
 			case Follower:
 				if !stepAsCandidate {
@@ -567,7 +578,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					rf.mu.Unlock()
 					// [350, 500]
 					// https://stackoverflow.com/questions/23577091/generating-random-numbers-over-a-range-in-go
-					t := rand.Intn(500-350) + 350
+					t := rand.Intn(300) + 1200
 					time.Sleep(time.Duration(t) * time.Millisecond)
 					rf.debugLog("follower awake")
 				} else {
@@ -577,14 +588,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					rf.debugLog("step as candidate")
 				}
 			case Candidate:
-
 				rf.startsElection()
 				t := rand.Intn(600-550) + 550
 				time.Sleep(time.Duration(t) * time.Millisecond)
 			case Leader:
 				rf.sendHeartbeat()
-				t := rand.Intn(50) + 50
-				time.Sleep(time.Duration(t) * time.Millisecond)
+				time.Sleep(100 * time.Millisecond)
+				rf.debugLog("leader awake")
 			}
 			rf.debugLog("end loop")
 		}
