@@ -80,7 +80,7 @@ type Raft struct {
 	termVotedFor map[int]int
 
 	stepAsCandidate bool // reset false when receive heartbeat rpc
-
+	stopLogging     bool
 	// 所有服务器经常改变
 	commitIndex int
 	lastApplied int
@@ -91,6 +91,9 @@ type Raft struct {
 }
 
 func (rf *Raft) debugLog(format string, a ...interface{}) (n int, err error) {
+	if rf.stopLogging {
+		return
+	}
 	format = fmt.Sprintf("\033[38;5;%dmS%d \033[39;49m", rf.me+10, rf.me) + format
 	return DPrintf(format, a...)
 }
@@ -538,6 +541,9 @@ func (rf *Raft) startsElection() {
 //
 func (rf *Raft) Kill() {
 	// Your code here, if desired.
+	rf.mu.Lock()
+	rf.stopLogging = true
+	rf.mu.Unlock()
 }
 
 //
