@@ -199,6 +199,7 @@ func (rf *Raft) checkTermSwitchFollower(term int) bool {
 		rf.state = Follower
 		rf.stepAsCandidate = false
 		isNotSwitch = false
+		rf.votedFor = 0
 		rf.debugLog("reset to follower")
 	}
 	rf.mu.Unlock()
@@ -541,6 +542,7 @@ func (rf *Raft) startsElection() {
 //
 func (rf *Raft) Kill() {
 	// Your code here, if desired.
+	rf.debugLog("killed")
 	rf.mu.Lock()
 	rf.stopLogging = true
 	rf.mu.Unlock()
