@@ -590,7 +590,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					// https://stackoverflow.com/questions/23577091/generating-random-numbers-over-a-range-in-go
 					t := rand.Intn(600) + 300
 					time.Sleep(time.Duration(t) * time.Millisecond)
-					rf.debugLog("follower awake")
+					rf.debugLog("follower awake %dms", t)
 				} else {
 					rf.mu.Lock()
 					rf.state = Candidate
@@ -601,6 +601,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				rf.startsElection()
 				t := rand.Intn(500) + 100
 				time.Sleep(time.Duration(t) * time.Millisecond)
+				rf.debugLog("candidate awake %dms", t)
+
 			case Leader:
 				rf.sendHeartbeat()
 				time.Sleep(110 * time.Millisecond)
