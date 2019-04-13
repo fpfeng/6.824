@@ -442,7 +442,6 @@ func (rf *Raft) sendHeartbeat() {
 	aea.Term = rf.currentTerm
 	aea.LeaderID = rf.me
 	if len(rf.log) > 0 {
-
 		aea.PrevLogTerm = rf.log[len(rf.log)-1].Term
 		aea.PrevLogIndex = len(rf.log) - 1
 	} else {
@@ -479,7 +478,7 @@ func (rf *Raft) stepAsLeader() {
 	rf.state = Leader
 	rf.mu.Unlock()
 	rf.initNextIndexAndMatchIndex()
-	rf.sendHeartbeat()
+	go rf.sendHeartbeat()
 }
 
 func (rf *Raft) startsElection() {
@@ -588,7 +587,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					rf.mu.Unlock()
 					// [350, 500]
 					// https://stackoverflow.com/questions/23577091/generating-random-numbers-over-a-range-in-go
-					t := rand.Intn(600) + 300
+					t := rand.Intn(100) + 300
 					time.Sleep(time.Duration(t) * time.Millisecond)
 					rf.debugLog("follower awake %dms", t)
 				} else {
@@ -599,7 +598,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				}
 			case Candidate:
 				rf.startsElection()
-				t := rand.Intn(500) + 100
+				t := rand.Intn(150) + 150
 				time.Sleep(time.Duration(t) * time.Millisecond)
 				rf.debugLog("candidate awake %dms", t)
 
