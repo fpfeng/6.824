@@ -574,6 +574,13 @@ func (rf *Raft) Kill() {
 // for any long-running work.
 //
 
+func sleepRandomRange(min, max int) int {
+	rand.Seed(time.Now().UnixNano())
+	t := rand.Intn(max-min) + min
+	time.Sleep(time.Duration(t) * time.Millisecond)
+	return t
+}
+
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
@@ -601,11 +608,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					rf.mu.Lock()
 					rf.stepAsCandidate = true
 					rf.mu.Unlock()
-					// [350, 500]
-					// https://stackoverflow.com/questions/23577091/generating-random-numbers-over-a-range-in-go
-					t := rand.Intn(100) + 300
-					time.Sleep(time.Duration(t) * time.Millisecond)
-					rf.debugLog("follower awake %dms", t)
+					rf.debugLog("follower awake %dms", sleepRandomRange(150, 250))
 				} else {
 					rf.mu.Lock()
 					rf.state = Candidate
@@ -614,13 +617,11 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				}
 			case Candidate:
 				rf.startsElection()
-				t := rand.Intn(350) + 250
-				time.Sleep(time.Duration(t) * time.Millisecond)
-				rf.debugLog("candidate awake %dms", t)
+				rf.debugLog("candidate awake %dms", sleepRandomRange(250, 400))
 
 			case Leader:
 				rf.sendHeartbeat()
-				time.Sleep(150 * time.Millisecond)
+				sleepRandomRange(100, 110)
 				rf.debugLog("leader awake")
 			}
 			rf.debugLog("end loop")
