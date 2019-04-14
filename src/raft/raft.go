@@ -77,7 +77,8 @@ type Raft struct {
 	log         []*LogEntry
 	state       RaftState
 
-	termVotedFor map[int]int
+	termVotedFor      map[int]int
+	termGetVotedCount map[int]int
 
 	stepAsCandidate bool // reset false when receive heartbeat rpc
 	stopLogging     bool
@@ -217,7 +218,6 @@ func (rf *Raft) initNextIndexAndMatchIndex() {
 		known to be replicated on server
 		(initialized to 0, increases monotonically)
 	*/
-	rf.mu.Lock()
 	rf.nextIndex = make(map[int]int)
 	rf.matchIndex = make(map[int]int)
 	for i := range rf.peers {
@@ -227,7 +227,6 @@ func (rf *Raft) initNextIndexAndMatchIndex() {
 		rf.nextIndex[i] = len(rf.log)
 		rf.matchIndex[i] = 0
 	}
-	rf.mu.Unlock()
 }
 
 //
@@ -244,7 +243,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	rf.mu.Lock()
 	currentTerm = rf.currentTerm
-	rf.debugLog("request vote current term: %d", currentTerm)
 	votedFor = rf.votedFor
 	logLength = len(rf.log)
 	if logLength > 0 {
@@ -257,7 +255,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		isTermNotVoted = false
 	}
 
-	rf.mu.Unlock()
+	rf.debugLog("recv request vote, term: %d", currentTerm)
 
 	/*
 		1. Reply false if term < currentTerm (§5.1)
@@ -275,19 +273,17 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	isLargeThanCurrentTerm := args.Term > currentTerm
 	isLogUpToDate := args.LastLogTerm >= lastLogTerm && args.LastLogIndex > logLength-1
 	rf.debugLog("candidate%d: [term: %d last index: %d last term: %d] current term: %d, last index:%d", args.CandidateID, args.Term, args.LastLogIndex, args.LastLogTerm, currentTerm, logLength-1)
-	rf.debugLog("candidate%d: args.LastLogTerm >= lastLogTerm: %t, args.LastLogIndex > logLength-1: %t", args.CandidateID, args.LastLogTerm >= lastLogTerm, args.LastLogIndex > logLength-1)
-	rf.debugLog("candidate%d: isLargeThanCurrentTerm: %t, isLogUptoDate: %t", args.CandidateID, isLargeThanCurrentTerm, isLogUpToDate)
+	rf.debugLog("candidate%d: isLargeThanCurrentTerm: %t, isLogUpToDate: %t, isTermNotVoted: %t, voteFor: %d", args.CandidateID, isLargeThanCurrentTerm, isLogUpToDate, isTermNotVoted, votedFor)
 	voteGranted = (votedFor == 0 || votedFor == args.CandidateID) && isLargeThanCurrentTerm && isLogUpToDate && isTermNotVoted
 
 	if voteGranted {
 		reply.Term = currentTerm
 		reply.VoteGranted = true
 
-		rf.mu.Lock()
 		rf.votedFor = args.CandidateID
 		rf.termVotedFor[args.Term] = args.CandidateID
-		rf.mu.Unlock()
 	}
+	rf.mu.Unlock()
 
 	rf.checkTermSwitchFollower(args.Term)
 	return
@@ -437,6 +433,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 //
 
 func (rf *Raft) sendHeartbeat() {
+	rf.debugLog("send heartbeat about to lock")
 	rf.mu.Lock()
 	aea := AppendEntriesArgs{}
 	aea.Term = rf.currentTerm
@@ -451,6 +448,7 @@ func (rf *Raft) sendHeartbeat() {
 	aea.Entries = make([]*LogEntry, 0)
 	aea.LeaderCommit = rf.commitIndex
 	rf.mu.Unlock()
+	rf.debugLog("send heartbeat unlock")
 
 	for idx := range rf.peers {
 		if idx == rf.me {
@@ -458,7 +456,7 @@ func (rf *Raft) sendHeartbeat() {
 		}
 
 		aer := AppendEntriesReply{}
-		rf.sendAppendEntries(idx, &aea, &aer)
+		go rf.sendAppendEntries(idx, &aea, &aer)
 	}
 }
 
@@ -475,9 +473,11 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) stepAsLeader() {
 	rf.debugLog("******* step as leader *******")
 	rf.mu.Lock()
-	rf.state = Leader
+	if rf.state != Leader {
+		rf.state = Leader
+		rf.initNextIndexAndMatchIndex()
+	}
 	rf.mu.Unlock()
-	rf.initNextIndexAndMatchIndex()
 	go rf.sendHeartbeat()
 }
 
@@ -495,9 +495,6 @@ func (rf *Raft) startsElection() {
 	*/
 	rf.debugLog("start election")
 	rva := RequestVoteArgs{CandidateID: rf.me}
-	getVotedCount := 1
-
-	var currentTerm int
 
 	rf.mu.Lock()
 	rf.currentTerm++
@@ -511,7 +508,6 @@ func (rf *Raft) startsElection() {
 		rva.LastLogIndex = 0
 		rva.LastLogTerm = 0
 	}
-	currentTerm = rf.currentTerm
 	rf.mu.Unlock()
 
 	for idx := range rf.peers {
@@ -519,16 +515,35 @@ func (rf *Raft) startsElection() {
 			continue
 		}
 
-		rvr := RequestVoteReply{}
-		isOk := rf.sendRequestVote(idx, &rva, &rvr)
-		rf.debugLog("follower%d vote reply: [grant: %t term: %d], isOk: %t current term: %d", idx, rvr.VoteGranted, rvr.Term, isOk, currentTerm)
-		if isOk && rvr.VoteGranted {
-			getVotedCount++
-			if getVotedCount > len(rf.peers)/2 {
-				rf.stepAsLeader()
-				break
+		rf.debugLog("send vote to follower%d", idx)
+		go func(nodeIdx int) {
+			rvr := RequestVoteReply{}
+			isOk := rf.sendRequestVote(nodeIdx, &rva, &rvr)
+			if !isOk {
+				return
 			}
-		}
+
+			var currentTerm int
+			rf.mu.Lock()
+			currentTerm = rf.currentTerm
+			rf.mu.Unlock()
+			rf.debugLog("follower%d vote:[isOk: %t grant: %t @ term: %d], current term: %d", nodeIdx, isOk, rvr.VoteGranted, rvr.Term, currentTerm)
+			if rvr.Term < currentTerm && rvr.VoteGranted {
+				var getVotedCount int
+				rf.mu.Lock()
+				if rf.termGetVotedCount[currentTerm] == 0 {
+					rf.termGetVotedCount[currentTerm] = 2 // leader vote itself + current follower vote
+				} else {
+					rf.termGetVotedCount[currentTerm]++
+				}
+				getVotedCount = rf.termGetVotedCount[currentTerm]
+				rf.mu.Unlock()
+
+				if getVotedCount > len(rf.peers)/2 {
+					rf.stepAsLeader()
+				}
+			}
+		}(idx)
 	}
 
 }
@@ -567,6 +582,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 	rf.log = make([]*LogEntry, 0)
 	rf.termVotedFor = make(map[int]int)
+	rf.termGetVotedCount = make(map[int]int)
 
 	// Your initialization code here (2A, 2B, 2C).
 	go func() {
@@ -598,13 +614,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				}
 			case Candidate:
 				rf.startsElection()
-				t := rand.Intn(150) + 150
+				t := rand.Intn(350) + 250
 				time.Sleep(time.Duration(t) * time.Millisecond)
 				rf.debugLog("candidate awake %dms", t)
 
 			case Leader:
 				rf.sendHeartbeat()
-				time.Sleep(110 * time.Millisecond)
+				time.Sleep(150 * time.Millisecond)
 				rf.debugLog("leader awake")
 			}
 			rf.debugLog("end loop")
