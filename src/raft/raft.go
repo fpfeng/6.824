@@ -608,7 +608,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					rf.mu.Lock()
 					rf.stepAsCandidate = true
 					rf.mu.Unlock()
-					rf.debugLog("follower awake %dms", sleepRandomRange(150, 250))
+					rf.debugLog("follower awake %dms", sleepRandomRange(400, 550))
 				} else {
 					rf.mu.Lock()
 					rf.state = Candidate
@@ -617,8 +617,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				}
 			case Candidate:
 				rf.startsElection()
-				rf.debugLog("candidate awake %dms", sleepRandomRange(250, 400))
-
+				rf.debugLog("candidate awake %dms", sleepRandomRange(200, 450))
 			case Leader:
 				rf.sendHeartbeat()
 				sleepRandomRange(100, 110)
