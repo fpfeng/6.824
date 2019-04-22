@@ -463,7 +463,14 @@ func (rf *Raft) sendHeartbeat() {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
 	term := -1
-	isLeader := true
+	isLeader := false
+	rf.mu.Lock()
+	isLeader = rf.state == Leader
+	rf.mu.Unlock()
+
+	if !isLeader {
+		return index, term, isLeader
+	}
 
 	// Your code here (2B).
 
