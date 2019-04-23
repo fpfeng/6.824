@@ -445,6 +445,10 @@ func (rf *Raft) sendHeartbeat() {
 	}
 }
 
+func (rf *Raft) doReplicateLog() {
+	// pass
+}
+
 //
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
@@ -465,13 +469,19 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := false
 	rf.mu.Lock()
 	isLeader = rf.state == Leader
-	rf.mu.Unlock()
 
 	if !isLeader {
+		rf.mu.Unlock()
 		return index, term, isLeader
 	}
 
-	// Your code here (2B).
+	le := LogEntry{Command: command, Term: rf.currentTerm}
+	rf.log = append(rf.log, &le)
+	index = len(rf.log) - 1
+	term = rf.currentTerm
+	rf.mu.Unlock()
+
+	go rf.doReplicateLog()
 
 	return index, term, isLeader
 }
