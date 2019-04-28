@@ -390,16 +390,19 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	if args.LeaderCommit > rf.commitIndex {
+		rf.log("leaderCommit %d > commitIndex %d", args.LeaderCommit, rf.commitIndex)
 		/*
 			5. If leaderCommit > commitIndex, set commitIndex =
 			min(leaderCommit, index of last new entry)
 		*/
 		var min int
-		lastNewEntryIndex := args.PrevLogIndex + len(args.Entries)
-
+		lastNewEntryIndex := len(rf.log) - 1
+		rf.log("lastNewEntryIndex: %d", lastNewEntryIndex)
 		if args.LeaderCommit < lastNewEntryIndex {
+			rf.log("set commitIndex as LeaderCommit")
 			min = args.LeaderCommit
 		} else {
+			rf.log("set commitIndex as lastNewEntryIndex")
 			min = lastNewEntryIndex
 		}
 		rf.commitIndex = min
