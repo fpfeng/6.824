@@ -80,6 +80,8 @@ type Raft struct {
 	termVotedFor      map[int]int
 	termGetVotedCount map[int]int
 
+	applyCh chan ApplyMsg
+
 	stepAsCandidate bool // reset false when receive heartbeat rpc
 	stopLogging     bool
 	// 所有服务器经常改变
@@ -390,19 +392,19 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	if args.LeaderCommit > rf.commitIndex {
-		rf.log("leaderCommit %d > commitIndex %d", args.LeaderCommit, rf.commitIndex)
+		rf.debugLog("leaderCommit %d > commitIndex %d", args.LeaderCommit, rf.commitIndex)
 		/*
 			5. If leaderCommit > commitIndex, set commitIndex =
 			min(leaderCommit, index of last new entry)
 		*/
 		var min int
 		lastNewEntryIndex := len(rf.log) - 1
-		rf.log("lastNewEntryIndex: %d", lastNewEntryIndex)
+		rf.debugLog("lastNewEntryIndex: %d", lastNewEntryIndex)
 		if args.LeaderCommit < lastNewEntryIndex {
-			rf.log("set commitIndex as LeaderCommit")
+			rf.debugLog("set commitIndex as LeaderCommit")
 			min = args.LeaderCommit
 		} else {
-			rf.log("set commitIndex as lastNewEntryIndex")
+			rf.debugLog("set commitIndex as lastNewEntryIndex")
 			min = lastNewEntryIndex
 		}
 		rf.commitIndex = min
@@ -445,6 +447,29 @@ func (rf *Raft) sendHeartbeat() {
 
 		aer := AppendEntriesReply{}
 		go rf.sendAppendEntries(idx, &aea, &aer)
+	}
+}
+
+func (rf *Raft) checkApplyLog() {
+	/*
+		If commitIndex > lastApplied: increment lastApplied, apply
+		log[lastApplied] to state machine (§5.3)
+	*/
+	for {
+		rf.mu.Lock()
+		if rf.commitIndex > rf.lastApplied {
+			am := ApplyMsg{
+				CommandValid: true,
+				Command:      rf.log[rf.lastApplied].Command,
+				CommandIndex: rf.lastApplied,
+			}
+			rf.lastApplied++
+			rf.mu.Unlock()
+			rf.applyCh <- am
+		} else {
+			rf.mu.Unlock()
+			break
+		}
 	}
 }
 
@@ -606,6 +631,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
+	rf.applyCh = applyCh
 	rf.log = make([]*LogEntry, 0)
 	rf.termVotedFor = make(map[int]int)
 	rf.termGetVotedCount = make(map[int]int)
