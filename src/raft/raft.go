@@ -450,6 +450,47 @@ func (rf *Raft) sendHeartbeat() {
 	}
 }
 
+func (rf *Raft) checkIncreaseCommitIndex() {
+	/*
+		If there exists an N such that N > commitIndex, a majority
+		of matchIndex[i] ≥ N, and log[N].term == currentTerm:
+		set commitIndex = N (§5.3, §5.4).
+	*/
+	matchIndexCount := make(map[int]int)
+	for idx, nodeMatchIndex := range rf.matchIndex {
+		if idx == rf.me {
+			continue
+		}
+
+		matchIndexCount[nodeMatchIndex]++
+	}
+
+	var isMajorityExists bool
+	for {
+		N := rf.commitIndex + 1
+		for matchIndex, count := range matchIndexCount {
+			if (matchIndex >= N) && (count > len(rf.peers)/2) {
+				isMajorityExists = true
+				break
+			}
+		}
+
+		if !isMajorityExists {
+			break
+		}
+
+		var isNExists bool
+		if len(rf.log) > N && rf.log[N].Term == rf.currentTerm {
+			rf.commitIndex = N
+			isNExists = true
+		}
+
+		if !isNExists {
+			break
+		}
+	}
+}
+
 func (rf *Raft) checkApplyLog() {
 	/*
 		If commitIndex > lastApplied: increment lastApplied, apply
@@ -474,7 +515,39 @@ func (rf *Raft) checkApplyLog() {
 }
 
 func (rf *Raft) doReplicateLog() {
-	// pass
+	/*
+		If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex
+		• If successful: update nextIndex and matchIndex for follower (§5.3)
+		• If AppendEntries fails because of log inconsistency: decrement nextIndex and retry (§5.3)
+	*/
+	for idx := range rf.peers {
+		nextIndex := rf.nextIndex[idx]
+		if idx == rf.me || nextIndex == rf.matchIndex[idx] || len(rf.log)-1 < nextIndex {
+			continue
+		}
+
+		prevLogIndex := len(rf.log) - 2
+
+		var aea AppendEntriesArgs
+		aea.LeaderID = rf.me
+		aea.LeaderCommit = rf.commitIndex
+		aea.PrevLogIndex = prevLogIndex
+		aea.PrevLogTerm = rf.log[prevLogIndex].Term
+		aea.Entries = rf.log[nextIndex:]
+
+		go func(nodeIdx int) {
+			var aer AppendEntriesReply
+			isOk := rf.sendAppendEntries(nodeIdx, &aea, &aer)
+
+			if isOk && aer.Success {
+				rf.nextIndex[nodeIdx] += len(aea.Entries)
+				rf.matchIndex[nodeIdx] += len(aea.Entries)
+			} else {
+				rf.nextIndex[nodeIdx]--
+			}
+
+		}(idx)
+	}
 }
 
 //
