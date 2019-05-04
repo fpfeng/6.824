@@ -362,6 +362,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
+	rf.debugLog("AppendEntries [prevLogIndex:%d prevLogTerm:%d logLen:%d]", args.PrevLogIndex, args.PrevLogTerm, len(args.Entries))
 	isPrevTermMatchs := false
 	isLogLengthOk := len(rf.log) >= args.PrevLogIndex
 	if isLogLengthOk {
@@ -456,6 +457,8 @@ func (rf *Raft) checkIncreaseCommitIndex() {
 		of matchIndex[i] ≥ N, and log[N].term == currentTerm:
 		set commitIndex = N (§5.3, §5.4).
 	*/
+	rf.debugLog("checkIncreaseCommitIndex about to lock")
+	rf.mu.Lock()
 	matchIndexCount := make(map[int]int)
 	for idx, nodeMatchIndex := range rf.matchIndex {
 		if idx == rf.me {
@@ -466,6 +469,7 @@ func (rf *Raft) checkIncreaseCommitIndex() {
 	}
 
 	var isMajorityExists bool
+
 	for {
 		N := rf.commitIndex + 1
 		for matchIndex, count := range matchIndexCount {
@@ -489,6 +493,8 @@ func (rf *Raft) checkIncreaseCommitIndex() {
 			break
 		}
 	}
+	rf.mu.Unlock()
+	rf.debugLog("done checkIncreaseCommitIndex")
 }
 
 func (rf *Raft) checkApplyLog() {
@@ -515,36 +521,46 @@ func (rf *Raft) checkApplyLog() {
 }
 
 func (rf *Raft) doReplicateLog() {
+	rf.debugLog("doReplicateLog...")
 	/*
 		If last log index ≥ nextIndex for a follower: send AppendEntries RPC with log entries starting at nextIndex
 		• If successful: update nextIndex and matchIndex for follower (§5.3)
 		• If AppendEntries fails because of log inconsistency: decrement nextIndex and retry (§5.3)
 	*/
 	for idx := range rf.peers {
+		rf.mu.Lock()
 		nextIndex := rf.nextIndex[idx]
-		if idx == rf.me || nextIndex == rf.matchIndex[idx] || len(rf.log)-1 < nextIndex {
+		matchIndex := rf.matchIndex[idx]
+		lastLogIndex := len(rf.log) - 1
+		rf.mu.Unlock()
+
+		if idx == rf.me || nextIndex == matchIndex || lastLogIndex < nextIndex {
 			continue
 		}
 
-		prevLogIndex := len(rf.log) - 2
+		prevLogIndex := lastLogIndex - 1
 
+		rf.mu.Lock()
 		var aea AppendEntriesArgs
 		aea.LeaderID = rf.me
 		aea.LeaderCommit = rf.commitIndex
 		aea.PrevLogIndex = prevLogIndex
 		aea.PrevLogTerm = rf.log[prevLogIndex].Term
 		aea.Entries = rf.log[nextIndex:]
+		rf.mu.Unlock()
 
 		go func(nodeIdx int) {
 			var aer AppendEntriesReply
 			isOk := rf.sendAppendEntries(nodeIdx, &aea, &aer)
 
+			rf.mu.Lock()
 			if isOk && aer.Success {
 				rf.nextIndex[nodeIdx] += len(aea.Entries)
 				rf.matchIndex[nodeIdx] += len(aea.Entries)
 			} else {
 				rf.nextIndex[nodeIdx]--
 			}
+			rf.mu.Unlock()
 
 		}(idx)
 	}
@@ -581,8 +597,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index = len(rf.log) - 1
 	term = rf.currentTerm
 	rf.mu.Unlock()
-
-	go rf.doReplicateLog()
 
 	return index, term, isLeader
 }
@@ -738,9 +752,12 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				rf.debugLog("candidate awake %dms", sleepRandomRange(200, 450))
 			case Leader:
 				rf.sendHeartbeat()
+				rf.checkIncreaseCommitIndex()
+				rf.doReplicateLog()
 				sleepRandomRange(100, 110)
 				rf.debugLog("leader awake")
 			}
+			rf.checkApplyLog()
 			rf.debugLog("end loop")
 		}
 	}()
