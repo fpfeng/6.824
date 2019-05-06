@@ -226,7 +226,7 @@ func (rf *Raft) initNextIndexAndMatchIndex() {
 		if i == rf.me {
 			continue
 		}
-		rf.nextIndex[i] = len(rf.log)
+		rf.nextIndex[i] = len(rf.log) + 1
 		rf.matchIndex[i] = 0
 	}
 }
@@ -364,11 +364,13 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.debugLog("AppendEntries [prevLogIndex:%d prevLogTerm:%d logLen:%d]", args.PrevLogIndex, args.PrevLogTerm, len(args.Entries))
 	isPrevTermMatchs := false
-	isLogLengthOk := len(rf.log) >= args.PrevLogIndex
-	if isLogLengthOk {
-		if args.PrevLogIndex == 0 && args.PrevLogTerm == 0 { // empty log
-			isPrevTermMatchs = true
-		} else {
+	isLogLengthOk := false
+	if args.PrevLogIndex == 0 && args.PrevLogTerm == 0 { // empty log
+		isLogLengthOk = true
+		isPrevTermMatchs = true
+	} else {
+		isLogLengthOk = len(rf.log) > args.PrevLogIndex
+		if isLogLengthOk {
 			isPrevTermMatchs = rf.log[args.PrevLogIndex].Term == args.PrevLogTerm
 		}
 	}
@@ -528,13 +530,18 @@ func (rf *Raft) doReplicateLog() {
 		• If AppendEntries fails because of log inconsistency: decrement nextIndex and retry (§5.3)
 	*/
 	for idx := range rf.peers {
+		if idx == rf.me {
+			continue
+		}
+
 		rf.mu.Lock()
 		nextIndex := rf.nextIndex[idx]
 		matchIndex := rf.matchIndex[idx]
 		lastLogIndex := len(rf.log) - 1
 		rf.mu.Unlock()
 
-		if idx == rf.me || nextIndex == matchIndex || lastLogIndex < nextIndex {
+		rf.debugLog("node:%d nextIndex:%d matchIndex:%d lastLogIndex:%d", idx, nextIndex, matchIndex, lastLogIndex)
+		if nextIndex == matchIndex || lastLogIndex < nextIndex {
 			continue
 		}
 
