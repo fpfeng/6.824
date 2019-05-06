@@ -366,7 +366,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	isPrevTermMatchs := false
 	isLogLengthOk := len(rf.log) >= args.PrevLogIndex
 	if isLogLengthOk {
-		if args.PrevLogIndex == -1 {
+		if args.PrevLogIndex == 0 && args.PrevLogTerm == 0 { // empty log
 			isPrevTermMatchs = true
 		} else {
 			isPrevTermMatchs = rf.log[args.PrevLogIndex].Term == args.PrevLogTerm
@@ -432,9 +432,9 @@ func (rf *Raft) sendHeartbeat() {
 	if len(rf.log) > 0 {
 		aea.PrevLogTerm = rf.log[len(rf.log)-1].Term
 		aea.PrevLogIndex = len(rf.log) - 1
-	} else {
-		aea.PrevLogTerm = rf.currentTerm
-		aea.PrevLogIndex = -1
+	} else { // both 0 when empty log
+		aea.PrevLogTerm = 0
+		aea.PrevLogIndex = 0
 	}
 	aea.Entries = make([]*LogEntry, 0)
 	aea.LeaderCommit = rf.commitIndex
