@@ -74,7 +74,7 @@ type Raft struct {
 	// 所有服务器固定存在
 	currentTerm int
 	votedFor    int
-	log         []*LogEntry
+	log         []LogEntry
 	state       RaftState
 
 	termVotedFor      map[int]int
@@ -180,7 +180,7 @@ type AppendEntriesArgs struct {
 	LeaderID     int
 	PrevLogIndex int
 	PrevLogTerm  int
-	Entries      []*LogEntry
+	Entries      []LogEntry
 	LeaderCommit int
 }
 
@@ -326,7 +326,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok && rf.checkTermSwitchFollower(reply.Term)
 }
 
-func (rf *Raft) deleteConflictEntries(newEntryIndex int, newEnties []*LogEntry) {
+func (rf *Raft) deleteConflictEntries(newEntryIndex int, newEnties []LogEntry) {
 	/*
 		3. If an existing entry conflicts with a new one (same index
 		but different terms), delete the existing entry and all that
@@ -362,7 +362,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
-	rf.debugLog("AppendEntries [prevLogIndex:%d prevLogTerm:%d logLen:%d]", args.PrevLogIndex, args.PrevLogTerm, len(args.Entries))
+	rf.debugLog("append called [prevLogIndex:%d prevLogTerm:%d logLen:%d]", args.PrevLogIndex, args.PrevLogTerm, len(args.Entries))
 	isPrevTermMatchs := false
 	isLogLengthOk := false
 	if args.PrevLogIndex == 0 && args.PrevLogTerm == 0 { // empty log
@@ -383,7 +383,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.stepAsCandidate = false
 	rf.mu.Unlock()
-	rf.debugLog("pass append enties pre-check [log length: %d]", len(rf.log))
+	rf.debugLog("pass append pre-check [log length:%d]", len(args.Entries))
 	rf.checkTermSwitchFollower(args.Term)
 	reply.Success = true
 
@@ -438,7 +438,7 @@ func (rf *Raft) sendHeartbeat() {
 		aea.PrevLogTerm = 0
 		aea.PrevLogIndex = 0
 	}
-	aea.Entries = make([]*LogEntry, 0)
+	aea.Entries = make([]LogEntry, 0)
 	aea.LeaderCommit = rf.commitIndex
 	rf.mu.Unlock()
 	rf.debugLog("send heartbeat unlock")
@@ -537,11 +537,11 @@ func (rf *Raft) doReplicateLog() {
 		rf.mu.Lock()
 		nextIndex := rf.nextIndex[idx]
 		matchIndex := rf.matchIndex[idx]
-		lastLogIndex := len(rf.log) - 1
+		lastLogIndex := len(rf.log)
 		rf.mu.Unlock()
 
 		rf.debugLog("node:%d nextIndex:%d matchIndex:%d lastLogIndex:%d", idx, nextIndex, matchIndex, lastLogIndex)
-		if nextIndex == matchIndex || lastLogIndex < nextIndex {
+		if lastLogIndex < nextIndex {
 			continue
 		}
 
@@ -553,19 +553,24 @@ func (rf *Raft) doReplicateLog() {
 		aea.LeaderCommit = rf.commitIndex
 		aea.PrevLogIndex = prevLogIndex
 		aea.PrevLogTerm = rf.log[prevLogIndex].Term
-		aea.Entries = rf.log[nextIndex:]
+		aea.Entries = append(aea.Entries, rf.log[nextIndex:]...)
+		rf.debugLog("len:%d %d", len(rf.log[nextIndex:]), len(aea.Entries))
 		rf.mu.Unlock()
 
 		go func(nodeIdx int) {
+			rf.debugLog("node:%d about to rpc call", nodeIdx)
 			var aer AppendEntriesReply
 			isOk := rf.sendAppendEntries(nodeIdx, &aea, &aer)
 
 			rf.mu.Lock()
+			rf.debugLog("node:%d reply:%t term:%d", nodeIdx, aer.Success, aer.Term)
 			if isOk && aer.Success {
 				rf.nextIndex[nodeIdx] += len(aea.Entries)
 				rf.matchIndex[nodeIdx] += len(aea.Entries)
-			} else {
-				rf.nextIndex[nodeIdx]--
+			} else if isOk && !aer.Success {
+				if rf.nextIndex[nodeIdx] > 0 {
+					rf.nextIndex[nodeIdx]--
+				}
 			}
 			rf.mu.Unlock()
 
@@ -600,7 +605,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 
 	le := LogEntry{Command: command, Term: rf.currentTerm}
-	rf.log = append(rf.log, &le)
+	rf.log = append(rf.log, le)
 	index = len(rf.log) - 1
 	term = rf.currentTerm
 	rf.mu.Unlock()
@@ -726,7 +731,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 	rf.applyCh = applyCh
-	rf.log = make([]*LogEntry, 0)
+	rf.log = make([]LogEntry, 0)
 	rf.termVotedFor = make(map[int]int)
 	rf.termGetVotedCount = make(map[int]int)
 
@@ -760,8 +765,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			case Leader:
 				rf.sendHeartbeat()
 				rf.checkIncreaseCommitIndex()
-				rf.doReplicateLog()
-				sleepRandomRange(100, 110)
+				go rf.doReplicateLog()
+				sleepRandomRange(20, 60)
 				rf.debugLog("leader awake")
 			}
 			rf.checkApplyLog()
