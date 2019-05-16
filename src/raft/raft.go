@@ -48,6 +48,7 @@ type ApplyMsg struct {
 type LogEntry struct {
 	Command interface{}
 	Term    int
+	Index   int
 }
 
 type RaftState int
@@ -553,12 +554,12 @@ func (rf *Raft) doReplicateLog() {
 		aea.LeaderCommit = rf.commitIndex
 		aea.PrevLogIndex = prevLogIndex
 		aea.PrevLogTerm = rf.log[prevLogIndex].Term
-		aea.Entries = append(aea.Entries, rf.log[nextIndex:]...)
+		aea.Entries = rf.log[nextIndex:]
 		rf.debugLog("len:%d %d", len(rf.log[nextIndex:]), len(aea.Entries))
 		rf.mu.Unlock()
 
 		go func(nodeIdx int) {
-			rf.debugLog("node:%d about to rpc call", nodeIdx)
+			rf.debugLog("node:%d about to rpc call %d", nodeIdx, len(aea.Entries))
 			var aer AppendEntriesReply
 			isOk := rf.sendAppendEntries(nodeIdx, &aea, &aer)
 
@@ -604,7 +605,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		return index, term, isLeader
 	}
 
-	le := LogEntry{Command: command, Term: rf.currentTerm}
+	le := LogEntry{Command: command, Term: rf.currentTerm, Index: len(rf.log)}
 	rf.log = append(rf.log, le)
 	index = len(rf.log) - 1
 	term = rf.currentTerm
@@ -765,8 +766,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			case Leader:
 				rf.sendHeartbeat()
 				rf.checkIncreaseCommitIndex()
+				rf.sendHeartbeat()
 				go rf.doReplicateLog()
-				sleepRandomRange(20, 60)
+				rf.sendHeartbeat()
+				sleepRandomRange(100, 110)
 				rf.debugLog("leader awake")
 			}
 			rf.checkApplyLog()
