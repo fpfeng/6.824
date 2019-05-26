@@ -427,31 +427,42 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 }
 
 func (rf *Raft) sendHeartbeat() {
-	rf.debugLog("send heartbeat about to lock")
-	rf.mu.Lock()
-	aea := AppendEntriesArgs{}
-	aea.Term = rf.currentTerm
-	aea.LeaderID = rf.me
-	if len(rf.log) > 0 {
-		aea.PrevLogTerm = rf.log[len(rf.log)-1].Term
-		aea.PrevLogIndex = len(rf.log) - 1
-	} else { // both 0 when empty log
-		aea.PrevLogTerm = 0
-		aea.PrevLogIndex = 0
-	}
-	aea.Entries = make([]LogEntry, 0)
-	aea.LeaderCommit = rf.commitIndex
-	rf.mu.Unlock()
-	rf.debugLog("send heartbeat unlock")
+	ticker := time.NewTicker(120 * time.Millisecond)
 
-	for idx := range rf.peers {
-		if idx == rf.me {
-			continue
+	go func() {
+		for range ticker.C {
+			rf.mu.Lock()
+			isLeader := rf.state == Leader
+
+			if isLeader {
+				aea := AppendEntriesArgs{}
+				aea.Term = rf.currentTerm
+				aea.LeaderID = rf.me
+				if len(rf.log) > 0 {
+					aea.PrevLogTerm = rf.log[len(rf.log)-1].Term
+					aea.PrevLogIndex = len(rf.log) - 1
+				} else { // both 0 when empty log
+					aea.PrevLogTerm = 0
+					aea.PrevLogIndex = 0
+				}
+				aea.Entries = make([]LogEntry, 0)
+				aea.LeaderCommit = rf.commitIndex
+				rf.mu.Unlock()
+				rf.debugLog("send heartbeat unlock")
+
+				for idx := range rf.peers {
+					if idx == rf.me {
+						continue
+					}
+
+					aer := AppendEntriesReply{}
+					go rf.sendAppendEntries(idx, &aea, &aer)
+				}
+			} else {
+				rf.mu.Unlock()
+			}
 		}
-
-		aer := AppendEntriesReply{}
-		go rf.sendAppendEntries(idx, &aea, &aer)
-	}
+	}()
 }
 
 func (rf *Raft) checkIncreaseCommitIndex() {
@@ -563,17 +574,19 @@ func (rf *Raft) doReplicateLog() {
 			var aer AppendEntriesReply
 			isOk := rf.sendAppendEntries(nodeIdx, &aea, &aer)
 
-			rf.mu.Lock()
-			rf.debugLog("node:%d reply:%t term:%d", nodeIdx, aer.Success, aer.Term)
-			if isOk && aer.Success {
-				rf.nextIndex[nodeIdx] += len(aea.Entries)
-				rf.matchIndex[nodeIdx] += len(aea.Entries)
-			} else if isOk && !aer.Success {
-				if rf.nextIndex[nodeIdx] > 0 {
-					rf.nextIndex[nodeIdx]--
+			if isOk {
+				rf.mu.Lock()
+				rf.debugLog("node:%d reply:%t term:%d", nodeIdx, aer.Success, aer.Term)
+				if aer.Success {
+					rf.nextIndex[nodeIdx] += len(aea.Entries)
+					rf.matchIndex[nodeIdx] += len(aea.Entries)
+				} else {
+					if rf.nextIndex[nodeIdx] > 0 {
+						rf.nextIndex[nodeIdx]--
+					}
 				}
+				rf.mu.Unlock()
 			}
-			rf.mu.Unlock()
 
 		}(idx)
 	}
@@ -737,6 +750,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.termGetVotedCount = make(map[int]int)
 
 	// Your initialization code here (2A, 2B, 2C).
+	rf.sendHeartbeat()
+
 	go func() {
 		for {
 			var currentState RaftState
@@ -764,11 +779,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				rf.startsElection()
 				rf.debugLog("candidate awake %dms", sleepRandomRange(200, 450))
 			case Leader:
-				rf.sendHeartbeat()
 				rf.checkIncreaseCommitIndex()
-				rf.sendHeartbeat()
 				go rf.doReplicateLog()
-				rf.sendHeartbeat()
 				sleepRandomRange(100, 110)
 				rf.debugLog("leader awake")
 			}
