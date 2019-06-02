@@ -83,8 +83,7 @@ type Raft struct {
 
 	applyCh chan ApplyMsg
 
-	stepAsCandidate bool // reset false when receive heartbeat rpc
-	stopLogging     bool
+	stopLogging bool
 	// 所有服务器经常改变
 	commitIndex int
 	lastApplied int
@@ -92,6 +91,8 @@ type Raft struct {
 	// 领导状态才改变的
 	nextIndex  map[int]int
 	matchIndex map[int]int
+
+	followerTicker *time.Ticker
 }
 
 func (rf *Raft) debugLog(format string, a ...interface{}) (n int, err error) {
@@ -201,7 +202,7 @@ func (rf *Raft) checkTermSwitchFollower(term int) bool {
 	if term > rf.currentTerm {
 		rf.currentTerm = term
 		rf.state = Follower
-		rf.stepAsCandidate = false
+		rf.followerTicker.Stop()
 		isNotSwitch = false
 		rf.votedFor = 0
 		rf.debugLog("reset to follower")
@@ -382,7 +383,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
-	rf.stepAsCandidate = false
+	rf.followerTicker.Stop()
+
 	rf.mu.Unlock()
 	rf.debugLog("pass append pre-check [log length:%d]", len(args.Entries))
 	rf.checkTermSwitchFollower(args.Term)
@@ -731,11 +733,37 @@ func (rf *Raft) Kill() {
 // for any long-running work.
 //
 
-func sleepRandomRange(min, max int) int {
+func randomRangeMillisecond(min, max int) int {
 	rand.Seed(time.Now().UnixNano())
-	t := rand.Intn(max-min) + min
+	return rand.Intn(max-min) + min
+}
+
+func sleepRandomRange(min, max int) int {
+	t := randomRangeMillisecond(min, max)
 	time.Sleep(time.Duration(t) * time.Millisecond)
 	return t
+}
+
+func (rf *Raft) waitTimeoutTurnCandidate() {
+	ms := randomRangeMillisecond(390, 440)
+
+	t := time.Duration(ms)
+	ticker := time.NewTicker(t * time.Millisecond)
+	rf.mu.Lock()
+	rf.state = Follower
+	rf.followerTicker = ticker
+	rf.mu.Unlock()
+
+	go func() {
+		for range ticker.C {
+			rf.mu.Lock()
+			rf.state = Candidate
+			rf.mu.Unlock()
+		}
+	}()
+	addFiveMS := time.Duration(ms + 5)
+	time.Sleep(addFiveMS * time.Millisecond)
+	ticker.Stop()
 }
 
 func Make(peers []*labrpc.ClientEnd, me int,
@@ -755,26 +783,14 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	go func() {
 		for {
 			var currentState RaftState
-			var stepAsCandidate bool
 			rf.mu.Lock()
 			currentState = rf.state
-			stepAsCandidate = rf.stepAsCandidate
 			rf.mu.Unlock()
 
-			rf.debugLog("current state: %d stepAsCandidate: %t", currentState, stepAsCandidate)
+			rf.debugLog("current state: %d", currentState)
 			switch currentState {
 			case Follower:
-				if !stepAsCandidate {
-					rf.mu.Lock()
-					rf.stepAsCandidate = true
-					rf.mu.Unlock()
-					rf.debugLog("follower awake %dms", sleepRandomRange(400, 550))
-				} else {
-					rf.mu.Lock()
-					rf.state = Candidate
-					rf.mu.Unlock()
-					rf.debugLog("step as candidate")
-				}
+				rf.waitTimeoutTurnCandidate()
 			case Candidate:
 				rf.startsElection()
 				rf.debugLog("candidate awake %dms", sleepRandomRange(200, 450))
