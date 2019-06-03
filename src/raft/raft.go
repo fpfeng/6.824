@@ -259,8 +259,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		isTermNotVoted = false
 	}
 
-	rf.debugLog("recv request vote, term: %d", currentTerm)
-
 	/*
 		1. Reply false if term < currentTerm (§5.1)
 		2. If votedFor is null or candidateId, and candidate’s log is at
@@ -276,7 +274,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	voteGranted := false
 	isLargeThanCurrentTerm := args.Term > currentTerm
 	isLogUpToDate := args.LastLogTerm >= lastLogTerm && args.LastLogIndex > logLength-1
-	rf.debugLog("candidate%d: [term: %d last index: %d last term: %d] current term: %d, last index:%d", args.CandidateID, args.Term, args.LastLogIndex, args.LastLogTerm, currentTerm, logLength-1)
+	rf.debugLog("candidate%d: (term: %d last index: %d last term: %d) current term: %d, last index:%d", args.CandidateID, args.Term, args.LastLogIndex, args.LastLogTerm, currentTerm, logLength-1)
 	rf.debugLog("candidate%d: isLargeThanCurrentTerm: %t, isLogUpToDate: %t, isTermNotVoted: %t, voteFor: %d", args.CandidateID, isLargeThanCurrentTerm, isLogUpToDate, isTermNotVoted, votedFor)
 	voteGranted = (votedFor == 0 || votedFor == args.CandidateID) && isLargeThanCurrentTerm && isLogUpToDate && isTermNotVoted
 
@@ -378,6 +376,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	if !isLogLengthOk || !isPrevTermMatchs {
+		rf.debugLog("!!pre-check fail: log length ok:%t, prev term match:%t", isLogLengthOk, isPrevTermMatchs)
 		rf.mu.Unlock()
 		reply.Success = false
 		return
@@ -429,7 +428,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 }
 
 func (rf *Raft) sendHeartbeat() {
-	ticker := time.NewTicker(120 * time.Millisecond)
+	ticker := time.NewTicker(101 * time.Millisecond)
 
 	go func() {
 		for range ticker.C {
@@ -440,6 +439,7 @@ func (rf *Raft) sendHeartbeat() {
 				aea := AppendEntriesArgs{}
 				aea.Term = rf.currentTerm
 				aea.LeaderID = rf.me
+				rf.debugLog("heartbeat log len:%d", len(rf.log))
 				if len(rf.log) > 0 {
 					aea.PrevLogTerm = rf.log[len(rf.log)-1].Term
 					aea.PrevLogIndex = len(rf.log) - 1
@@ -624,6 +624,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.log = append(rf.log, le)
 	index = len(rf.log) - 1
 	term = rf.currentTerm
+	rf.debugLog(">> append log")
 	rf.mu.Unlock()
 
 	return index, term, isLeader
@@ -637,7 +638,6 @@ func (rf *Raft) stepAsLeader() {
 		rf.initNextIndexAndMatchIndex()
 	}
 	rf.mu.Unlock()
-	go rf.sendHeartbeat()
 }
 
 func (rf *Raft) startsElection() {
@@ -797,7 +797,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			case Leader:
 				rf.checkIncreaseCommitIndex()
 				go rf.doReplicateLog()
-				sleepRandomRange(100, 110)
+				sleepRandomRange(60, 80)
 				rf.debugLog("leader awake")
 			}
 			rf.checkApplyLog()
