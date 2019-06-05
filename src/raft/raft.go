@@ -440,7 +440,7 @@ func (rf *Raft) sendHeartbeat() {
 				aea.Term = rf.currentTerm
 				aea.LeaderID = rf.me
 				rf.debugLog("heartbeat log len:%d", len(rf.log))
-				if len(rf.log) > 0 {
+				if len(rf.log) > 1 {
 					aea.PrevLogTerm = rf.log[len(rf.log)-1].Term
 					aea.PrevLogIndex = len(rf.log) - 1
 				} else { // both 0 when empty log
@@ -566,8 +566,15 @@ func (rf *Raft) doReplicateLog() {
 		aea.LeaderID = rf.me
 		aea.LeaderCommit = rf.commitIndex
 		aea.PrevLogIndex = prevLogIndex
-		aea.PrevLogTerm = rf.log[prevLogIndex].Term
-		aea.Entries = rf.log[nextIndex:]
+
+		if prevLogIndex == 0 { // first log
+			aea.PrevLogTerm = 0
+		} else {
+			aea.PrevLogTerm = rf.log[prevLogIndex].Term
+		}
+
+		aea.Entries = make([]LogEntry, len(rf.log)-nextIndex)
+		copy(aea.Entries, rf.log[nextIndex:])
 		rf.debugLog("len:%d %d", len(rf.log[nextIndex:]), len(aea.Entries))
 		rf.mu.Unlock()
 
