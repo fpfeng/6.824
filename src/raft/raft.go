@@ -99,7 +99,7 @@ func (rf *Raft) debugLog(format string, a ...interface{}) (n int, err error) {
 	if rf.stopLogging {
 		return
 	}
-	format = fmt.Sprintf("\033[38;5;%dmS%d \033[39;49m", rf.me+10, rf.me) + format
+	format = fmt.Sprintf("[%d] ", rf.me) + format
 	return DPrintf(format, a...)
 }
 
@@ -357,6 +357,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Term = rf.currentTerm
 
 	if args.Term < rf.currentTerm {
+		rf.debugLog("s%d term less than me", args.LeaderID)
 		rf.mu.Unlock()
 		reply.Success = false
 		return
@@ -428,7 +429,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 }
 
 func (rf *Raft) sendHeartbeat() {
-	ticker := time.NewTicker(101 * time.Millisecond)
+	ticker := time.NewTicker(150 * time.Millisecond)
 
 	go func() {
 		for range ticker.C {
@@ -447,7 +448,7 @@ func (rf *Raft) sendHeartbeat() {
 					aea.PrevLogTerm = 0
 					aea.PrevLogIndex = 0
 				}
-				aea.Entries = make([]LogEntry, 0)
+				aea.Entries = nil
 				aea.LeaderCommit = rf.commitIndex
 				rf.mu.Unlock()
 				rf.debugLog("send heartbeat unlock")
@@ -459,6 +460,7 @@ func (rf *Raft) sendHeartbeat() {
 
 					aer := AppendEntriesReply{}
 					go rf.sendAppendEntries(idx, &aea, &aer)
+					rf.debugLog("heartbeat send to node:%d", idx)
 				}
 			} else {
 				rf.mu.Unlock()
@@ -563,6 +565,7 @@ func (rf *Raft) doReplicateLog() {
 
 		rf.mu.Lock()
 		var aea AppendEntriesArgs
+		aea.Term = rf.currentTerm
 		aea.LeaderID = rf.me
 		aea.LeaderCommit = rf.commitIndex
 		aea.PrevLogIndex = prevLogIndex
@@ -573,7 +576,7 @@ func (rf *Raft) doReplicateLog() {
 			aea.PrevLogTerm = rf.log[prevLogIndex].Term
 		}
 
-		aea.Entries = make([]LogEntry, len(rf.log)-nextIndex)
+		aea.Entries = make([]LogEntry, len(rf.log)-nextIndex+1)
 		copy(aea.Entries, rf.log[nextIndex:])
 		rf.debugLog("len:%d %d", len(rf.log[nextIndex:]), len(aea.Entries))
 		rf.mu.Unlock()
