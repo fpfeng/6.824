@@ -332,10 +332,11 @@ func (rf *Raft) deleteConflictEntries(newEntryIndex int, newEnties []LogEntry) {
 		but different terms), delete the existing entry and all that
 		follow it (§5.3)
 	*/
-	if len(newEnties) == 0 {
+	if len(newEnties) == 0 || len(rf.log) < newEntryIndex {
 		return
 	}
 	if rf.log[newEntryIndex].Term != newEnties[0].Term {
+		rf.debugLog("deleteConflictEntries %d logs from idx:%d", len(newEnties), newEntryIndex)
 		rf.log = rf.log[:newEntryIndex]
 	}
 }
@@ -483,6 +484,7 @@ func (rf *Raft) checkIncreaseCommitIndex() {
 			continue
 		}
 
+		rf.debugLog("node%d matchIndex:%d", idx, nodeMatchIndex)
 		matchIndexCount[nodeMatchIndex]++
 	}
 
@@ -490,6 +492,7 @@ func (rf *Raft) checkIncreaseCommitIndex() {
 
 	for {
 		N := rf.commitIndex + 1
+		rf.debugLog("N: %d", N)
 		for matchIndex, count := range matchIndexCount {
 			if (matchIndex >= N) && (count > len(rf.peers)/2) {
 				isMajorityExists = true
@@ -497,16 +500,21 @@ func (rf *Raft) checkIncreaseCommitIndex() {
 			}
 		}
 
+		rf.debugLog("isMajorityExists:%t", isMajorityExists)
 		if !isMajorityExists {
 			break
 		}
 
 		var isNExists bool
-		if len(rf.log) > N && rf.log[N].Term == rf.currentTerm {
-			rf.commitIndex = N
-			isNExists = true
+		if len(rf.log) >= N {
+			rf.debugLog("log N term:%d, current term:%d", rf.log[N].Term, rf.currentTerm)
+			if rf.log[N].Term == rf.currentTerm {
+				rf.commitIndex = N
+				isNExists = true
+			}
 		}
 
+		rf.debugLog("isNExists:%t", isNExists)
 		if !isNExists {
 			break
 		}
@@ -578,7 +586,7 @@ func (rf *Raft) doReplicateLog() {
 
 		aea.Entries = make([]LogEntry, len(rf.log)-nextIndex+1)
 		copy(aea.Entries, rf.log[nextIndex:])
-		rf.debugLog("len:%d %d", len(rf.log[nextIndex:]), len(aea.Entries))
+		rf.debugLog("send %d logs to node:%d from idx:%d", len(aea.Entries), idx, nextIndex)
 		rf.mu.Unlock()
 
 		go func(nodeIdx int) {
@@ -588,7 +596,7 @@ func (rf *Raft) doReplicateLog() {
 
 			if isOk {
 				rf.mu.Lock()
-				rf.debugLog("node:%d reply:%t term:%d", nodeIdx, aer.Success, aer.Term)
+				rf.debugLog("node:%d reply success:%t term:%d", nodeIdx, aer.Success, aer.Term)
 				if aer.Success {
 					rf.nextIndex[nodeIdx] += len(aea.Entries)
 					rf.matchIndex[nodeIdx] += len(aea.Entries)
@@ -696,7 +704,7 @@ func (rf *Raft) startsElection() {
 			rf.mu.Lock()
 			currentTerm = rf.currentTerm
 			rf.mu.Unlock()
-			rf.debugLog("follower%d vote:[isOk: %t grant: %t @ term: %d], current term: %d", nodeIdx, isOk, rvr.VoteGranted, rvr.Term, currentTerm)
+			rf.debugLog("follower%d vote:[isOk:%t grant:%t term: %d], current term:%d", nodeIdx, isOk, rvr.VoteGranted, rvr.Term, currentTerm)
 			if rvr.Term < currentTerm && rvr.VoteGranted {
 				var getVotedCount int
 				rf.mu.Lock()
