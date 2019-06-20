@@ -791,7 +791,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 	rf.applyCh = applyCh
-	rf.log = make([]LogEntry, 0)
+	rf.log = make([]LogEntry, 1)
+	rf.log = append(rf.log, LogEntry{nil, 0, 0})
 	rf.termVotedFor = make(map[int]int)
 	rf.termGetVotedCount = make(map[int]int)
 
