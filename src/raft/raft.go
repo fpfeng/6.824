@@ -249,11 +249,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	currentTerm = rf.currentTerm
 	votedFor = rf.votedFor
 	logLength = len(rf.log)
-	if logLength > 0 {
-		lastLogTerm = rf.log[logLength-1].Term
-	} else {
-		lastLogTerm = 0
-	}
+	lastLogTerm = rf.log[logLength-1].Term
 
 	if _, exists := rf.termVotedFor[args.Term]; exists {
 		isTermNotVoted = false
@@ -273,7 +269,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	*/
 	voteGranted := false
 	isLargeThanCurrentTerm := args.Term > currentTerm
-	isLogUpToDate := args.LastLogTerm >= lastLogTerm && args.LastLogIndex > logLength-1
+	isLogUpToDate := args.LastLogTerm >= lastLogTerm && args.LastLogIndex >= logLength-1
 	rf.debugLog("candidate%d: (term: %d last index: %d last term: %d) current term: %d, last index:%d", args.CandidateID, args.Term, args.LastLogIndex, args.LastLogTerm, currentTerm, logLength-1)
 	rf.debugLog("candidate%d: isLargeThanCurrentTerm: %t, isLogUpToDate: %t, isTermNotVoted: %t, voteFor: %d", args.CandidateID, isLargeThanCurrentTerm, isLogUpToDate, isTermNotVoted, votedFor)
 	voteGranted = (votedFor == 0 || votedFor == args.CandidateID) && isLargeThanCurrentTerm && isLogUpToDate && isTermNotVoted
@@ -367,14 +363,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.debugLog("append called [prevLogIndex:%d prevLogTerm:%d logLen:%d]", args.PrevLogIndex, args.PrevLogTerm, len(args.Entries))
 	isPrevTermMatchs := false
 	isLogLengthOk := false
-	if args.PrevLogIndex == 0 && args.PrevLogTerm == 0 { // empty log
-		isLogLengthOk = true
-		isPrevTermMatchs = true
-	} else {
-		isLogLengthOk = len(rf.log) > args.PrevLogIndex
-		if isLogLengthOk {
-			isPrevTermMatchs = rf.log[args.PrevLogIndex].Term == args.PrevLogTerm
-		}
+	isLogLengthOk = len(rf.log) > args.PrevLogIndex
+	if isLogLengthOk {
+		isPrevTermMatchs = rf.log[args.PrevLogIndex].Term == args.PrevLogTerm
 	}
 
 	if !isLogLengthOk || !isPrevTermMatchs {
@@ -438,17 +429,13 @@ func (rf *Raft) sendHeartbeat() {
 			isLeader := rf.state == Leader
 
 			if isLeader {
+				logLength := len(rf.log)
 				aea := AppendEntriesArgs{}
 				aea.Term = rf.currentTerm
 				aea.LeaderID = rf.me
-				rf.debugLog("heartbeat log len:%d", len(rf.log))
-				if len(rf.log) > 1 {
-					aea.PrevLogTerm = rf.log[len(rf.log)-1].Term
-					aea.PrevLogIndex = len(rf.log) - 1
-				} else { // both 0 when empty log
-					aea.PrevLogTerm = 0
-					aea.PrevLogIndex = 0
-				}
+				rf.debugLog("heartbeat log len:%d", logLength)
+				aea.PrevLogTerm = rf.log[logLength-1].Term
+				aea.PrevLogIndex = logLength - 1
 				aea.Entries = nil
 				aea.LeaderCommit = rf.commitIndex
 				rf.mu.Unlock()
@@ -577,12 +564,7 @@ func (rf *Raft) doReplicateLog() {
 		aea.LeaderID = rf.me
 		aea.LeaderCommit = rf.commitIndex
 		aea.PrevLogIndex = prevLogIndex
-
-		if prevLogIndex == 0 { // first log
-			aea.PrevLogTerm = 0
-		} else {
-			aea.PrevLogTerm = rf.log[prevLogIndex].Term
-		}
+		aea.PrevLogTerm = rf.log[prevLogIndex].Term
 
 		aea.Entries = make([]LogEntry, len(rf.log)-nextIndex+1)
 		copy(aea.Entries, rf.log[nextIndex:])
@@ -678,13 +660,8 @@ func (rf *Raft) startsElection() {
 	rf.votedFor = rf.me
 	rf.termVotedFor[rf.currentTerm] = rf.me
 	rva.Term = rf.currentTerm
-	if len(rf.log) > 0 {
-		rva.LastLogIndex = len(rf.log) - 1
-		rva.LastLogTerm = rf.log[rva.LastLogIndex].Term
-	} else {
-		rva.LastLogIndex = 0
-		rva.LastLogTerm = 0
-	}
+	rva.LastLogIndex = len(rf.log) - 1
+	rva.LastLogTerm = rf.log[rva.LastLogIndex].Term
 	rf.mu.Unlock()
 
 	for idx := range rf.peers {
@@ -791,7 +768,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 	rf.applyCh = applyCh
-	rf.log = make([]LogEntry, 1)
+	rf.log = make([]LogEntry, 0)
 	rf.log = append(rf.log, LogEntry{nil, 0, 0})
 	rf.termVotedFor = make(map[int]int)
 	rf.termGetVotedCount = make(map[int]int)
