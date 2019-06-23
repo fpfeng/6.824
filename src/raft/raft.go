@@ -228,7 +228,7 @@ func (rf *Raft) initNextIndexAndMatchIndex() {
 		if i == rf.me {
 			continue
 		}
-		rf.nextIndex[i] = len(rf.log) + 1
+		rf.nextIndex[i] = len(rf.log)
 		rf.matchIndex[i] = 0
 	}
 }
@@ -322,18 +322,18 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok && rf.checkTermSwitchFollower(reply.Term)
 }
 
-func (rf *Raft) deleteConflictEntries(newEntryIndex int, newEnties []LogEntry) {
+func (rf *Raft) deleteConflictEntries(newLogIndex int, newEnties []LogEntry) {
 	/*
 		3. If an existing entry conflicts with a new one (same index
 		but different terms), delete the existing entry and all that
 		follow it (§5.3)
 	*/
-	if len(newEnties) == 0 || len(rf.log) < newEntryIndex {
+	if len(newEnties) == 0 || len(rf.log) <= newLogIndex {
 		return
 	}
-	if rf.log[newEntryIndex].Term != newEnties[0].Term {
-		rf.debugLog("deleteConflictEntries %d logs from idx:%d", len(newEnties), newEntryIndex)
-		rf.log = rf.log[:newEntryIndex]
+	if rf.log[newLogIndex].Term != newEnties[0].Term {
+		rf.debugLog("deleteConflictEntries logs after index:%d", newLogIndex)
+		rf.log = rf.log[:newLogIndex]
 	}
 }
 
@@ -349,8 +349,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		5. If leaderCommit > commitIndex, set commitIndex =
 		min(leaderCommit, index of last new entry)
 	*/
-	rf.mu.Lock()
 
+	rf.mu.Lock()
+	currentLogLength := len(rf.log)
 	reply.Term = rf.currentTerm
 
 	if args.Term < rf.currentTerm {
@@ -363,7 +364,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.debugLog("append called [prevLogIndex:%d prevLogTerm:%d logLen:%d]", args.PrevLogIndex, args.PrevLogTerm, len(args.Entries))
 	isPrevTermMatchs := false
 	isLogLengthOk := false
-	isLogLengthOk = len(rf.log) > args.PrevLogIndex
+	isLogLengthOk = currentLogLength > args.PrevLogIndex
 	if isLogLengthOk {
 		isPrevTermMatchs = rf.log[args.PrevLogIndex].Term == args.PrevLogTerm
 	}
@@ -378,13 +379,15 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.followerTicker.Stop()
 
 	rf.mu.Unlock()
-	rf.debugLog("pass append pre-check [log length:%d]", len(args.Entries))
+	newEntriesLength := len(args.Entries)
+
+	rf.debugLog("pass append pre-check [log length:%d]", newEntriesLength)
 	rf.checkTermSwitchFollower(args.Term)
 	reply.Success = true
 
 	rf.mu.Lock()
 	rf.deleteConflictEntries(args.PrevLogIndex+1, args.Entries)
-	if len(args.Entries) > 0 {
+	if newEntriesLength > 0 {
 		// Append any new entries not already in the log 这里感觉不对
 		rf.log = append(rf.log, args.Entries...)
 	}
@@ -396,7 +399,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			min(leaderCommit, index of last new entry)
 		*/
 		var min int
-		lastNewEntryIndex := len(rf.log) - 1
+		lastNewEntryIndex := currentLogLength - 1
 		rf.debugLog("lastNewEntryIndex: %d", lastNewEntryIndex)
 		if args.LeaderCommit < lastNewEntryIndex {
 			rf.debugLog("set commitIndex as LeaderCommit")
@@ -407,8 +410,12 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 		rf.commitIndex = min
 	}
+	if newEntriesLength > 0 {
+		rf.debugLog("done AppendEntries with %d new log, current total log:%d", newEntriesLength, len(rf.log))
+	} else {
+		rf.debugLog("done heartbeat AppendEntries")
+	}
 	rf.mu.Unlock()
-	rf.debugLog("done append enties")
 	return
 }
 
@@ -493,10 +500,11 @@ func (rf *Raft) checkIncreaseCommitIndex() {
 		}
 
 		var isNExists bool
-		if len(rf.log) >= N {
+		if len(rf.log) > N {
 			rf.debugLog("log N term:%d, current term:%d", rf.log[N].Term, rf.currentTerm)
 			if rf.log[N].Term == rf.currentTerm {
 				rf.commitIndex = N
+				rf.debugLog("set commitIndex to %d", N)
 				isNExists = true
 			}
 		}
@@ -517,15 +525,19 @@ func (rf *Raft) checkApplyLog() {
 	*/
 	for {
 		rf.mu.Lock()
+		rf.debugLog("commitIndex:%d, lastApplied:%d", rf.commitIndex, rf.lastApplied)
 		if rf.commitIndex > rf.lastApplied {
 			am := ApplyMsg{
 				CommandValid: true,
-				Command:      rf.log[rf.lastApplied].Command,
-				CommandIndex: rf.lastApplied,
+				Command:      rf.log[rf.commitIndex].Command,
+				CommandIndex: rf.commitIndex,
 			}
 			rf.lastApplied++
+
 			rf.mu.Unlock()
+			rf.debugLog("send applyCh CommandValid:%t CommandIndex:%d", am.CommandValid, am.CommandIndex)
 			rf.applyCh <- am
+			rf.debugLog("done send applyCh")
 		} else {
 			rf.mu.Unlock()
 			break
@@ -548,7 +560,7 @@ func (rf *Raft) doReplicateLog() {
 		rf.mu.Lock()
 		nextIndex := rf.nextIndex[idx]
 		matchIndex := rf.matchIndex[idx]
-		lastLogIndex := len(rf.log)
+		lastLogIndex := len(rf.log) - 1
 		rf.mu.Unlock()
 
 		rf.debugLog("node:%d nextIndex:%d matchIndex:%d lastLogIndex:%d", idx, nextIndex, matchIndex, lastLogIndex)
@@ -566,7 +578,7 @@ func (rf *Raft) doReplicateLog() {
 		aea.PrevLogIndex = prevLogIndex
 		aea.PrevLogTerm = rf.log[prevLogIndex].Term
 
-		aea.Entries = make([]LogEntry, len(rf.log)-nextIndex+1)
+		aea.Entries = make([]LogEntry, len(rf.log[nextIndex:]))
 		copy(aea.Entries, rf.log[nextIndex:])
 		rf.debugLog("send %d logs to node:%d from idx:%d", len(aea.Entries), idx, nextIndex)
 		rf.mu.Unlock()
@@ -769,7 +781,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 	rf.applyCh = applyCh
 	rf.log = make([]LogEntry, 0)
-	rf.log = append(rf.log, LogEntry{nil, 0, 0})
+	rf.log = append(rf.log, LogEntry{0, 0, 0})
 	rf.termVotedFor = make(map[int]int)
 	rf.termGetVotedCount = make(map[int]int)
 
