@@ -643,11 +643,13 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 }
 
 func (rf *Raft) stepAsLeader() {
-	rf.debugLog("******* step as leader *******")
 	rf.mu.Lock()
-	if rf.state != Leader {
+	if rf.state == Candidate {
 		rf.state = Leader
 		rf.initNextIndexAndMatchIndex()
+		rf.debugLog("******* step as leader *******")
+	} else {
+		rf.debugLog("current state: %d, aint gonna do it", rf.state)
 	}
 	rf.mu.Unlock()
 }
