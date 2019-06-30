@@ -191,6 +191,15 @@ type AppendEntriesReply struct {
 	Success bool
 }
 
+func (rf *Raft) resetToFollower() {
+	if rf.state != Follower {
+		rf.debugLog("reset to follower")
+		rf.state = Follower
+		rf.followerTicker.Stop()
+		rf.votedFor = 0
+	}
+}
+
 func (rf *Raft) checkTermSwitchFollower(term int) bool {
 	/*
 		If RPC request or response contains term T > currentTerm:
@@ -201,11 +210,8 @@ func (rf *Raft) checkTermSwitchFollower(term int) bool {
 	rf.mu.Lock()
 	if term > rf.currentTerm {
 		rf.currentTerm = term
-		rf.state = Follower
-		rf.followerTicker.Stop()
+		rf.resetToFollower()
 		isNotSwitch = false
-		rf.votedFor = 0
-		rf.debugLog("reset to follower")
 	}
 	rf.mu.Unlock()
 
@@ -318,8 +324,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 //
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
-
-	return ok && rf.checkTermSwitchFollower(reply.Term)
+	rf.checkTermSwitchFollower(reply.Term)
+	return ok
 }
 
 func (rf *Raft) deleteConflictEntries(newLogIndex int, newEnties []LogEntry) {
@@ -376,8 +382,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
-	rf.followerTicker.Stop()
-
+	rf.resetToFollower()
 	rf.mu.Unlock()
 	newEntriesLength := len(args.Entries)
 
@@ -411,6 +416,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.commitIndex = min
 	}
 	if newEntriesLength > 0 {
+		rf.debugLog("new log content:%d", args.Entries[0].Command)
 		rf.debugLog("done AppendEntries with %d new log, current total log:%d", newEntriesLength, len(rf.log))
 	} else {
 		rf.debugLog("done heartbeat AppendEntries")
@@ -639,6 +645,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.debugLog(">> append log")
 	rf.mu.Unlock()
 
+	go rf.doReplicateLog()
 	return index, term, isLeader
 }
 
