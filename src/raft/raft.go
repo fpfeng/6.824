@@ -195,9 +195,9 @@ func (rf *Raft) resetToFollower() {
 	if rf.state != Follower {
 		rf.debugLog("reset to follower")
 		rf.state = Follower
-		rf.followerTicker.Stop()
 		rf.votedFor = 0
 	}
+	rf.followerTicker.Stop()
 }
 
 func (rf *Raft) checkTermSwitchFollower(term int) bool {
