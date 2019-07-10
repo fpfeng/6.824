@@ -813,7 +813,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				rf.debugLog("candidate awake %dms", sleepRandomRange(200, 450))
 			case Leader:
 				rf.checkIncreaseCommitIndex()
-				go rf.doReplicateLog()
 				sleepRandomRange(60, 80)
 				rf.debugLog("leader awake")
 			}
