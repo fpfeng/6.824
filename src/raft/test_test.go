@@ -126,22 +126,32 @@ func TestFailAgree2B(t *testing.T) {
 
 	// follower network disconnection
 	leader := cfg.checkOneLeader()
+	fmt.Printf("disconnect node:%d\n", (leader+1)%servers)
 	cfg.disconnect((leader + 1) % servers)
 
 	// agree despite one disconnected server?
 	cfg.one(102, servers-1, false)
+	fmt.Printf("102 pass\n")
 	cfg.one(103, servers-1, false)
+	fmt.Printf("103 pass\n")
 	time.Sleep(RaftElectionTimeout)
+	fmt.Printf("test sleep awake\n")
 	cfg.one(104, servers-1, false)
+	fmt.Printf("104 pass\n")
 	cfg.one(105, servers-1, false)
+	fmt.Printf("105 pass\n")
 
 	// re-connect
 	cfg.connect((leader + 1) % servers)
+	fmt.Printf("reconnect node\n")
 
 	// agree with full set of servers?
 	cfg.one(106, servers, true)
+	fmt.Printf("106 pass\n")
 	time.Sleep(RaftElectionTimeout)
+	fmt.Printf("test sleep awake\n")
 	cfg.one(107, servers, true)
+	fmt.Printf("107 pass\n")
 
 	cfg.end()
 }
