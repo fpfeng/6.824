@@ -197,7 +197,6 @@ func (rf *Raft) resetToFollower() {
 		rf.state = Follower
 		rf.votedFor = 0
 	}
-	rf.followerTicker.Stop()
 }
 
 func (rf *Raft) checkTermSwitchFollower(term int) bool {
@@ -209,6 +208,7 @@ func (rf *Raft) checkTermSwitchFollower(term int) bool {
 
 	rf.mu.Lock()
 	if term > rf.currentTerm {
+		rf.debugLog("set term to %d", term)
 		rf.currentTerm = term
 		rf.resetToFollower()
 		isNotSwitch = false
@@ -391,6 +391,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Success = true
 
 	rf.mu.Lock()
+	rf.followerTicker.Stop()
 	rf.deleteConflictEntries(args.PrevLogIndex+1, args.Entries)
 	if newEntriesLength > 0 {
 		// Append any new entries not already in the log 这里感觉不对
@@ -487,6 +488,7 @@ func (rf *Raft) checkIncreaseCommitIndex() {
 		rf.debugLog("node%d matchIndex:%d", idx, nodeMatchIndex)
 		matchIndexCount[nodeMatchIndex]++
 	}
+	matchIndexCount[len(rf.log)-1]++ // leader it self
 
 	var isMajorityExists bool
 
@@ -642,6 +644,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.log = append(rf.log, le)
 	index = len(rf.log) - 1
 	term = rf.currentTerm
+	rf.commitIndex++
 	rf.debugLog(">> append log")
 	rf.mu.Unlock()
 
@@ -780,6 +783,7 @@ func (rf *Raft) waitTimeoutTurnCandidate() {
 	addFiveMS := time.Duration(ms + 5)
 	time.Sleep(addFiveMS * time.Millisecond)
 	ticker.Stop()
+	rf.debugLog("follower awake %dms", ms+5)
 }
 
 func Make(peers []*labrpc.ClientEnd, me int,
