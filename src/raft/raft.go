@@ -197,7 +197,9 @@ func (rf *Raft) resetToFollower() {
 		rf.debugLog("reset to follower")
 		rf.state = Follower
 		rf.votedFor = 0
-		rf.heartbeatTicker.Stop()
+		if rf.heartbeatTicker != nil {
+			rf.heartbeatTicker.Stop()
+		}
 	}
 }
 
@@ -726,7 +728,7 @@ func (rf *Raft) startsElection() {
 
 				if getVotedCount > len(rf.peers)/2 {
 					rf.stepAsLeader()
-					break
+					return
 				}
 			}
 		}(idx)
