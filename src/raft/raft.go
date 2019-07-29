@@ -92,7 +92,8 @@ type Raft struct {
 	nextIndex  map[int]int
 	matchIndex map[int]int
 
-	followerTicker *time.Ticker
+	followerTicker  *time.Ticker
+	heartbeatTicker *time.Ticker
 }
 
 func (rf *Raft) debugLog(format string, a ...interface{}) (n int, err error) {
@@ -196,6 +197,7 @@ func (rf *Raft) resetToFollower() {
 		rf.debugLog("reset to follower")
 		rf.state = Follower
 		rf.votedFor = 0
+		rf.heartbeatTicker.Stop()
 	}
 }
 
@@ -435,38 +437,43 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 }
 
 func (rf *Raft) sendHeartbeat() {
+	rf.mu.Lock()
+	isLeader := rf.state == Leader
+
+	if isLeader {
+		logLength := len(rf.log)
+		aea := AppendEntriesArgs{}
+		aea.Term = rf.currentTerm
+		aea.LeaderID = rf.me
+		rf.debugLog("heartbeat log len:%d", logLength)
+		aea.PrevLogTerm = rf.log[logLength-1].Term
+		aea.PrevLogIndex = logLength - 1
+		aea.Entries = nil
+		aea.LeaderCommit = rf.commitIndex
+		rf.mu.Unlock()
+		rf.debugLog("send heartbeat unlock")
+
+		for idx := range rf.peers {
+			if idx == rf.me {
+				continue
+			}
+
+			aer := AppendEntriesReply{}
+			go rf.sendAppendEntries(idx, &aea, &aer)
+			rf.debugLog("heartbeat send to node:%d", idx)
+		}
+	} else {
+		rf.mu.Unlock()
+	}
+}
+
+func (rf *Raft) intervalSendHeartbeat() {
 	ticker := time.NewTicker(150 * time.Millisecond)
+	rf.heartbeatTicker = ticker
 
 	go func() {
 		for range ticker.C {
-			rf.mu.Lock()
-			isLeader := rf.state == Leader
-
-			if isLeader {
-				logLength := len(rf.log)
-				aea := AppendEntriesArgs{}
-				aea.Term = rf.currentTerm
-				aea.LeaderID = rf.me
-				rf.debugLog("heartbeat log len:%d", logLength)
-				aea.PrevLogTerm = rf.log[logLength-1].Term
-				aea.PrevLogIndex = logLength - 1
-				aea.Entries = nil
-				aea.LeaderCommit = rf.commitIndex
-				rf.mu.Unlock()
-				rf.debugLog("send heartbeat unlock")
-
-				for idx := range rf.peers {
-					if idx == rf.me {
-						continue
-					}
-
-					aer := AppendEntriesReply{}
-					go rf.sendAppendEntries(idx, &aea, &aer)
-					rf.debugLog("heartbeat send to node:%d", idx)
-				}
-			} else {
-				rf.mu.Unlock()
-			}
+			rf.sendHeartbeat()
 		}
 	}()
 }
@@ -719,6 +726,7 @@ func (rf *Raft) startsElection() {
 
 				if getVotedCount > len(rf.peers)/2 {
 					rf.stepAsLeader()
+					break
 				}
 			}
 		}(idx)
@@ -799,7 +807,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.termGetVotedCount = make(map[int]int)
 
 	// Your initialization code here (2A, 2B, 2C).
-	rf.sendHeartbeat()
 
 	go func() {
 		for {
@@ -816,6 +823,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				rf.startsElection()
 				rf.debugLog("candidate awake %dms", sleepRandomRange(200, 450))
 			case Leader:
+				rf.intervalSendHeartbeat()
 				rf.checkIncreaseCommitIndex()
 				sleepRandomRange(60, 80)
 				rf.debugLog("leader awake")
