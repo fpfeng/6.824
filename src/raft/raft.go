@@ -197,9 +197,7 @@ func (rf *Raft) resetToFollower() {
 		rf.debugLog("reset to follower")
 		rf.state = Follower
 		rf.votedFor = 0
-		if rf.heartbeatTicker != nil {
-			rf.heartbeatTicker.Stop()
-		}
+		stopTickerIfIsValid(rf.heartbeatTicker)
 	}
 }
 
@@ -469,9 +467,20 @@ func (rf *Raft) sendHeartbeat() {
 	}
 }
 
+func stopTickerIfIsValid(ticker *time.Ticker) {
+	if ticker != nil {
+		ticker.Stop()
+	}
+}
+
 func (rf *Raft) intervalSendHeartbeat() {
+	stopTickerIfIsValid(rf.heartbeatTicker)
+	go rf.sendHeartbeat()
+
 	ticker := time.NewTicker(150 * time.Millisecond)
+	rf.mu.Lock()
 	rf.heartbeatTicker = ticker
+	rf.mu.Unlock()
 
 	go func() {
 		for range ticker.C {
@@ -728,6 +737,7 @@ func (rf *Raft) startsElection() {
 
 				if getVotedCount > len(rf.peers)/2 {
 					rf.stepAsLeader()
+					rf.intervalSendHeartbeat()
 					return
 				}
 			}
