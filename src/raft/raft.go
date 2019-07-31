@@ -571,6 +571,57 @@ func (rf *Raft) checkApplyLog() {
 	}
 }
 
+func (rf *Raft) replicateLogToNode(nodeIndex int) {
+	rf.mu.Lock()
+	nextIndex := rf.nextIndex[nodeIndex]
+	matchIndex := rf.matchIndex[nodeIndex]
+	lastLogIndex := len(rf.log) - 1
+	rf.mu.Unlock()
+
+	rf.debugLog("node:%d nextIndex:%d matchIndex:%d lastLogIndex:%d", nodeIndex, nextIndex, matchIndex, lastLogIndex)
+	if lastLogIndex < nextIndex {
+		return
+	}
+
+	prevLogIndex := lastLogIndex - 1
+
+	rf.mu.Lock()
+	var aea AppendEntriesArgs
+	aea.Term = rf.currentTerm
+	aea.LeaderID = rf.me
+	aea.LeaderCommit = rf.commitIndex
+	aea.PrevLogIndex = prevLogIndex
+	aea.PrevLogTerm = rf.log[prevLogIndex].Term
+
+	aea.Entries = make([]LogEntry, len(rf.log[nextIndex:]))
+	copy(aea.Entries, rf.log[nextIndex:])
+	rf.debugLog("send %d logs to node:%d from idx:%d", len(aea.Entries), nodeIndex, nextIndex)
+	rf.mu.Unlock()
+
+	go func(nodeIdx int) {
+		rf.debugLog("node:%d about to rpc call %d", nodeIdx, len(aea.Entries))
+		var aer AppendEntriesReply
+		isOk := rf.sendAppendEntries(nodeIdx, &aea, &aer)
+
+		if isOk {
+			rf.mu.Lock()
+			rf.debugLog("node:%d reply success:%t term:%d", nodeIdx, aer.Success, aer.Term)
+			if aer.Success {
+				rf.nextIndex[nodeIdx] += len(aea.Entries)
+				rf.matchIndex[nodeIdx] += len(aea.Entries)
+			} else {
+				if rf.nextIndex[nodeIdx] > 0 {
+					rf.nextIndex[nodeIdx]--
+					rf.replicateLogToNode(nodeIdx)
+				}
+			}
+			rf.mu.Unlock()
+		}
+
+	}(nodeIndex)
+
+}
+
 func (rf *Raft) doReplicateLog() {
 	rf.debugLog("doReplicateLog...")
 	/*
@@ -582,53 +633,7 @@ func (rf *Raft) doReplicateLog() {
 		if idx == rf.me {
 			continue
 		}
-
-		rf.mu.Lock()
-		nextIndex := rf.nextIndex[idx]
-		matchIndex := rf.matchIndex[idx]
-		lastLogIndex := len(rf.log) - 1
-		rf.mu.Unlock()
-
-		rf.debugLog("node:%d nextIndex:%d matchIndex:%d lastLogIndex:%d", idx, nextIndex, matchIndex, lastLogIndex)
-		if lastLogIndex < nextIndex {
-			continue
-		}
-
-		prevLogIndex := lastLogIndex - 1
-
-		rf.mu.Lock()
-		var aea AppendEntriesArgs
-		aea.Term = rf.currentTerm
-		aea.LeaderID = rf.me
-		aea.LeaderCommit = rf.commitIndex
-		aea.PrevLogIndex = prevLogIndex
-		aea.PrevLogTerm = rf.log[prevLogIndex].Term
-
-		aea.Entries = make([]LogEntry, len(rf.log[nextIndex:]))
-		copy(aea.Entries, rf.log[nextIndex:])
-		rf.debugLog("send %d logs to node:%d from idx:%d", len(aea.Entries), idx, nextIndex)
-		rf.mu.Unlock()
-
-		go func(nodeIdx int) {
-			rf.debugLog("node:%d about to rpc call %d", nodeIdx, len(aea.Entries))
-			var aer AppendEntriesReply
-			isOk := rf.sendAppendEntries(nodeIdx, &aea, &aer)
-
-			if isOk {
-				rf.mu.Lock()
-				rf.debugLog("node:%d reply success:%t term:%d", nodeIdx, aer.Success, aer.Term)
-				if aer.Success {
-					rf.nextIndex[nodeIdx] += len(aea.Entries)
-					rf.matchIndex[nodeIdx] += len(aea.Entries)
-				} else {
-					if rf.nextIndex[nodeIdx] > 0 {
-						rf.nextIndex[nodeIdx]--
-					}
-				}
-				rf.mu.Unlock()
-			}
-
-		}(idx)
+		rf.replicateLogToNode(idx)
 	}
 }
 
@@ -835,6 +840,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				rf.startsElection()
 				rf.debugLog("candidate awake %dms", sleepRandomRange(200, 450))
 			case Leader:
+				rf.doReplicateLog()
 				rf.intervalSendHeartbeat()
 				rf.checkIncreaseCommitIndex()
 				sleepRandomRange(60, 80)
