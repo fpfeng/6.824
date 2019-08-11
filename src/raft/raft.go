@@ -217,6 +217,7 @@ func (rf *Raft) checkTermSwitchFollower(term int) bool {
 	}
 	rf.mu.Unlock()
 
+	rf.debugLog("done check term")
 	return isNotSwitch
 }
 
@@ -458,8 +459,14 @@ func (rf *Raft) sendHeartbeat() {
 				continue
 			}
 
-			aer := AppendEntriesReply{}
-			go rf.sendAppendEntries(idx, &aea, &aer)
+			go func() {
+				aer := AppendEntriesReply{}
+				isOk := rf.sendAppendEntries(idx, &aea, &aer)
+				if !isOk {
+					rf.debugLog("node %d heartbeat fail, try replicate log", idx)
+					rf.replicateLogToNode(idx)
+				}
+			}()
 			rf.debugLog("heartbeat send to node:%d", idx)
 		}
 	} else {
@@ -549,6 +556,7 @@ func (rf *Raft) checkApplyLog() {
 		If commitIndex > lastApplied: increment lastApplied, apply
 		log[lastApplied] to state machine (§5.3)
 	*/
+	rf.debugLog("start check apply log")
 	for {
 		rf.mu.Lock()
 		rf.debugLog("commitIndex:%d, lastApplied:%d", rf.commitIndex, rf.lastApplied)
@@ -571,8 +579,20 @@ func (rf *Raft) checkApplyLog() {
 	}
 }
 
+func (rf *Raft) isInState(state RaftState) bool {
+	return rf.state == state
+}
+
 func (rf *Raft) replicateLogToNode(nodeIndex int) {
+	rf.debugLog("replicateLogToNode: %d", nodeIndex)
 	rf.mu.Lock()
+
+	if !rf.isInState(Leader) {
+		rf.mu.Unlock()
+		rf.debugLog("state changed: %d", rf.state)
+		return
+	}
+
 	nextIndex := rf.nextIndex[nodeIndex]
 	matchIndex := rf.matchIndex[nodeIndex]
 	lastLogIndex := len(rf.log) - 1
@@ -580,6 +600,7 @@ func (rf *Raft) replicateLogToNode(nodeIndex int) {
 
 	rf.debugLog("node:%d nextIndex:%d matchIndex:%d lastLogIndex:%d", nodeIndex, nextIndex, matchIndex, lastLogIndex)
 	if lastLogIndex < nextIndex {
+		rf.debugLog("node:%d skip replicate log", nodeIndex)
 		return
 	}
 
@@ -596,26 +617,30 @@ func (rf *Raft) replicateLogToNode(nodeIndex int) {
 	aea.Entries = make([]LogEntry, len(rf.log[nextIndex:]))
 	copy(aea.Entries, rf.log[nextIndex:])
 	rf.debugLog("send %d logs to node:%d from idx:%d", len(aea.Entries), nodeIndex, nextIndex)
+
 	rf.mu.Unlock()
 
 	go func(nodeIdx int) {
-		rf.debugLog("node:%d about to rpc call %d", nodeIdx, len(aea.Entries))
+		rf.debugLog("rpc call node: %d", nodeIdx)
 		var aer AppendEntriesReply
 		isOk := rf.sendAppendEntries(nodeIdx, &aea, &aer)
 
 		if isOk {
-			rf.mu.Lock()
 			rf.debugLog("node:%d reply success:%t term:%d", nodeIdx, aer.Success, aer.Term)
 			if aer.Success {
+				rf.mu.Lock()
 				rf.nextIndex[nodeIdx] += len(aea.Entries)
 				rf.matchIndex[nodeIdx] += len(aea.Entries)
+				rf.mu.Unlock()
 			} else {
-				if rf.nextIndex[nodeIdx] > 0 {
+				if rf.nextIndex[nodeIdx] > 1 {
+					rf.mu.Lock()
 					rf.nextIndex[nodeIdx]--
-					rf.replicateLogToNode(nodeIdx)
+					rf.debugLog("node: %d nextIndex-- to %d, lets try again", nodeIdx, rf.nextIndex[nodeIdx])
+					rf.mu.Unlock()
 				}
+				rf.replicateLogToNode(nodeIdx)
 			}
-			rf.mu.Unlock()
 		}
 
 	}(nodeIndex)
