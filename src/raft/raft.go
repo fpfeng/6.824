@@ -463,8 +463,14 @@ func (rf *Raft) sendHeartbeat() {
 				aer := AppendEntriesReply{}
 				isOk := rf.sendAppendEntries(idx, &aea, &aer)
 				if !isOk {
-					rf.debugLog("node %d heartbeat fail, try replicate log", idx)
-					rf.replicateLogToNode(idx)
+					rf.mu.Lock()
+					if rf.nextIndex[idx] > 1 {
+						rf.nextIndex[idx]--
+						rf.debugLog("node %d heartbeat fail, nextIndex--:%d", idx, rf.nextIndex[idx])
+					} else {
+						rf.debugLog("node %d heartbeat fail, nextIndex:%d", idx, rf.nextIndex[idx])
+					}
+					rf.mu.Unlock()
 				}
 			}()
 			rf.debugLog("heartbeat send to node:%d", idx)
@@ -599,12 +605,15 @@ func (rf *Raft) replicateLogToNode(nodeIndex int) {
 	rf.mu.Unlock()
 
 	rf.debugLog("node:%d nextIndex:%d matchIndex:%d lastLogIndex:%d", nodeIndex, nextIndex, matchIndex, lastLogIndex)
-	if lastLogIndex < nextIndex {
+	if lastLogIndex < 1 || lastLogIndex < nextIndex {
 		rf.debugLog("node:%d skip replicate log", nodeIndex)
 		return
 	}
 
-	prevLogIndex := lastLogIndex - 1
+	prevLogIndex := 0
+	if lastLogIndex > 0 {
+		prevLogIndex = lastLogIndex - 1
+	}
 
 	rf.mu.Lock()
 	var aea AppendEntriesArgs
@@ -633,12 +642,12 @@ func (rf *Raft) replicateLogToNode(nodeIndex int) {
 				rf.matchIndex[nodeIdx] += len(aea.Entries)
 				rf.mu.Unlock()
 			} else {
+				rf.mu.Lock()
 				if rf.nextIndex[nodeIdx] > 1 {
-					rf.mu.Lock()
 					rf.nextIndex[nodeIdx]--
 					rf.debugLog("node: %d nextIndex-- to %d, lets try again", nodeIdx, rf.nextIndex[nodeIdx])
-					rf.mu.Unlock()
 				}
+				rf.mu.Unlock()
 				rf.replicateLogToNode(nodeIdx)
 			}
 		}
