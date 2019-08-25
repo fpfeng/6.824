@@ -437,46 +437,53 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	return ok
 }
 
-func (rf *Raft) sendHeartbeat() {
+func (rf *Raft) sendHeartbeatToNode(nodeIdx int, replicateLogIfReplySuccess bool) {
 	rf.mu.Lock()
-	isLeader := rf.state == Leader
-
-	if isLeader {
-		logLength := len(rf.log)
-		aea := AppendEntriesArgs{}
-		aea.Term = rf.currentTerm
-		aea.LeaderID = rf.me
-		rf.debugLog("heartbeat log len:%d", logLength)
-		aea.PrevLogTerm = rf.log[logLength-1].Term
-		aea.PrevLogIndex = logLength - 1
-		aea.Entries = nil
-		aea.LeaderCommit = rf.commitIndex
+	if rf.state != Leader {
 		rf.mu.Unlock()
-		rf.debugLog("send heartbeat unlock")
+		return
+	}
 
-		for idx := range rf.peers {
-			if idx == rf.me {
-				continue
-			}
+	aea := AppendEntriesArgs{}
+	aea.Term = rf.currentTerm
+	aea.LeaderID = rf.me
+	nodeNextIndex := rf.nextIndex[nodeIdx]
+	rf.debugLog("heartbeat to node:%d, nodeNextIndex:%d, log length:%d", nodeIdx, nodeNextIndex, len(rf.log))
 
-			go func() {
-				aer := AppendEntriesReply{}
-				isOk := rf.sendAppendEntries(idx, &aea, &aer)
-				if !isOk {
-					rf.mu.Lock()
-					if rf.nextIndex[idx] > 1 {
-						rf.nextIndex[idx]--
-						rf.debugLog("node %d heartbeat fail, nextIndex--:%d", idx, rf.nextIndex[idx])
-					} else {
-						rf.debugLog("node %d heartbeat fail, nextIndex:%d", idx, rf.nextIndex[idx])
-					}
-					rf.mu.Unlock()
-				}
-			}()
-			rf.debugLog("heartbeat send to node:%d", idx)
+	aea.PrevLogTerm = rf.log[nodeNextIndex-1].Term
+	aea.PrevLogIndex = nodeNextIndex - 1
+	aea.Entries = nil
+	aea.LeaderCommit = rf.commitIndex
+	rf.mu.Unlock()
+	rf.debugLog("send heartbeat unlock")
+
+	aer := AppendEntriesReply{}
+	isOk := rf.sendAppendEntries(nodeIdx, &aea, &aer)
+	if !isOk {
+		rf.mu.Lock()
+		if rf.nextIndex[nodeIdx] > 1 {
+			rf.nextIndex[nodeIdx]--
+			rf.debugLog("node %d heartbeat fail, nextIndex--:%d", nodeIdx, rf.nextIndex[nodeIdx])
+			rf.sendHeartbeatToNode(nodeIdx, true)
+		} else {
+			rf.debugLog("node %d heartbeat fail, nextIndex:%d", nodeIdx, rf.nextIndex[nodeIdx])
 		}
-	} else {
 		rf.mu.Unlock()
+	} else {
+		if replicateLogIfReplySuccess {
+			rf.replicateLogToNode(nodeIdx)
+		}
+	}
+}
+
+func (rf *Raft) sendHeartbeat() {
+	for idx := range rf.peers {
+		if idx == rf.me {
+			continue
+		}
+
+		go rf.sendHeartbeatToNode(idx, false)
+		rf.debugLog("heartbeat send to node:%d", idx)
 	}
 }
 
