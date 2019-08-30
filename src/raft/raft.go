@@ -517,6 +517,12 @@ func (rf *Raft) checkIncreaseCommitIndex() {
 	*/
 	rf.debugLog("checkIncreaseCommitIndex about to lock")
 	rf.mu.Lock()
+	if !rf.isInState(Leader) {
+		rf.mu.Unlock()
+		return
+		rf.debugLog("state changed: %d, skip checkIncreaseCommitIndex", rf.state)
+	}
+
 	matchIndexCount := make(map[int]int)
 	for idx, nodeMatchIndex := range rf.matchIndex {
 		if idx == rf.me {
