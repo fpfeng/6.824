@@ -373,7 +373,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	isPrevTermMatchs := false
 	isLogLengthOk := false
 	isLogLengthOk = currentLogLength > args.PrevLogIndex
-	rf.debugLog("append params: [prevLogIndex:%d prevLogTerm:%d logLenth:%d]", args.PrevLogIndex, args.PrevLogTerm, len(args.Entries))
+	rf.debugLog("append params: [prevLogIndex:%d prevLogTerm:%d logLength:%d]", args.PrevLogIndex, args.PrevLogTerm, len(args.Entries))
 	if isLogLengthOk {
 		rf.debugLog("node prevLogTerm: %d", rf.log[args.PrevLogIndex].Term)
 		isPrevTermMatchs = rf.log[args.PrevLogIndex].Term == args.PrevLogTerm
@@ -449,7 +449,8 @@ func (rf *Raft) sendHeartbeatToNode(nodeIdx int, replicateLogIfReplySuccess bool
 	aea.Term = rf.currentTerm
 	aea.LeaderID = rf.me
 	nodeNextIndex := rf.nextIndex[nodeIdx]
-	rf.debugLog("heartbeat to node:%d, nodeNextIndex:%d, log length:%d", nodeIdx, nodeNextIndex, len(rf.log))
+	logLength := len(rf.log)
+	rf.debugLog("heartbeat to node:%d, nodeNextIndex:%d, log length:%d", nodeIdx, nodeNextIndex, logLength)
 
 	aea.PrevLogTerm = rf.log[nodeNextIndex-1].Term
 	aea.PrevLogIndex = nodeNextIndex - 1
@@ -460,20 +461,22 @@ func (rf *Raft) sendHeartbeatToNode(nodeIdx int, replicateLogIfReplySuccess bool
 
 	aer := AppendEntriesReply{}
 	isOk := rf.sendAppendEntries(nodeIdx, &aea, &aer)
-	if !isOk {
-		rf.mu.Lock()
-		if rf.nextIndex[nodeIdx] > 1 {
-			rf.nextIndex[nodeIdx]--
-			rf.debugLog("node %d heartbeat fail, nextIndex--:%d", nodeIdx, rf.nextIndex[nodeIdx])
-			rf.mu.Unlock()
-			rf.sendHeartbeatToNode(nodeIdx, true)
+	if isOk {
+		if aer.Success {
+			if replicateLogIfReplySuccess && logLength >= nodeNextIndex {
+				rf.replicateLogToNode(nodeIdx)
+			}
 		} else {
-			rf.mu.Unlock()
-			rf.debugLog("node %d heartbeat fail, nextIndex:%d", nodeIdx, rf.nextIndex[nodeIdx])
-		}
-	} else {
-		if replicateLogIfReplySuccess {
-			rf.replicateLogToNode(nodeIdx)
+			rf.mu.Lock()
+			if rf.nextIndex[nodeIdx] > 1 {
+				rf.nextIndex[nodeIdx]--
+				rf.debugLog("node %d heartbeat fail, nextIndex--:%d", nodeIdx, rf.nextIndex[nodeIdx])
+				rf.mu.Unlock()
+				rf.sendHeartbeatToNode(nodeIdx, true)
+			} else {
+				rf.mu.Unlock()
+				rf.debugLog("node %d heartbeat fail, nextIndex:%d", nodeIdx, rf.nextIndex[nodeIdx])
+			}
 		}
 	}
 }
