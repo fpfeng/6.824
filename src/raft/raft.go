@@ -370,16 +370,17 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
-	rf.debugLog("append called [prevLogIndex:%d prevLogTerm:%d logLen:%d]", args.PrevLogIndex, args.PrevLogTerm, len(args.Entries))
 	isPrevTermMatchs := false
 	isLogLengthOk := false
 	isLogLengthOk = currentLogLength > args.PrevLogIndex
+	rf.debugLog("append params: [prevLogIndex:%d prevLogTerm:%d logLenth:%d]", args.PrevLogIndex, args.PrevLogTerm, len(args.Entries))
 	if isLogLengthOk {
+		rf.debugLog("node prevLogTerm: %d", rf.log[args.PrevLogIndex].Term)
 		isPrevTermMatchs = rf.log[args.PrevLogIndex].Term == args.PrevLogTerm
 	}
 
 	if !isLogLengthOk || !isPrevTermMatchs {
-		rf.debugLog("!!pre-check fail: log length ok:%t, prev term match:%t", isLogLengthOk, isPrevTermMatchs)
+		rf.debugLog("!!params check fail: log length ok:%t, prev term match:%t", isLogLengthOk, isPrevTermMatchs)
 		rf.mu.Unlock()
 		reply.Success = false
 		return
@@ -439,7 +440,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 
 func (rf *Raft) sendHeartbeatToNode(nodeIdx int, replicateLogIfReplySuccess bool) {
 	rf.mu.Lock()
-	if rf.state != Leader {
+	if !rf.isInState(Leader) {
 		rf.mu.Unlock()
 		return
 	}
@@ -464,11 +465,12 @@ func (rf *Raft) sendHeartbeatToNode(nodeIdx int, replicateLogIfReplySuccess bool
 		if rf.nextIndex[nodeIdx] > 1 {
 			rf.nextIndex[nodeIdx]--
 			rf.debugLog("node %d heartbeat fail, nextIndex--:%d", nodeIdx, rf.nextIndex[nodeIdx])
+			rf.mu.Unlock()
 			rf.sendHeartbeatToNode(nodeIdx, true)
 		} else {
+			rf.mu.Unlock()
 			rf.debugLog("node %d heartbeat fail, nextIndex:%d", nodeIdx, rf.nextIndex[nodeIdx])
 		}
-		rf.mu.Unlock()
 	} else {
 		if replicateLogIfReplySuccess {
 			rf.replicateLogToNode(nodeIdx)
@@ -482,7 +484,7 @@ func (rf *Raft) sendHeartbeat() {
 			continue
 		}
 
-		go rf.sendHeartbeatToNode(idx, false)
+		go rf.sendHeartbeatToNode(idx, true)
 		rf.debugLog("heartbeat send to node:%d", idx)
 	}
 }
@@ -655,13 +657,7 @@ func (rf *Raft) replicateLogToNode(nodeIndex int) {
 				rf.matchIndex[nodeIdx] += len(aea.Entries)
 				rf.mu.Unlock()
 			} else {
-				rf.mu.Lock()
-				if rf.nextIndex[nodeIdx] > 1 {
-					rf.nextIndex[nodeIdx]--
-					rf.debugLog("node: %d nextIndex-- to %d, lets try again", nodeIdx, rf.nextIndex[nodeIdx])
-				}
-				rf.mu.Unlock()
-				rf.replicateLogToNode(nodeIdx)
+				rf.debugLog("node: %d nextIndex: %d fail replicate log", nodeIdx, rf.nextIndex[nodeIdx])
 			}
 		}
 
@@ -887,7 +883,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				rf.startsElection()
 				rf.debugLog("candidate awake %dms", sleepRandomRange(200, 450))
 			case Leader:
-				rf.doReplicateLog()
 				rf.intervalSendHeartbeat()
 				rf.checkIncreaseCommitIndex()
 				sleepRandomRange(60, 80)
