@@ -94,6 +94,8 @@ type Raft struct {
 
 	followerTicker  *time.Ticker
 	heartbeatTicker *time.Ticker
+
+	heartbeatInProgress map[int]bool // pretty sure this is stupid
 }
 
 func (rf *Raft) debugLog(format string, a ...interface{}) (n int, err error) {
@@ -233,12 +235,15 @@ func (rf *Raft) initNextIndexAndMatchIndex() {
 	*/
 	rf.nextIndex = make(map[int]int)
 	rf.matchIndex = make(map[int]int)
+	rf.heartbeatInProgress = make(map[int]bool) // it is 23:28 right now, too lazy to move it another place
+
 	for i := range rf.peers {
 		if i == rf.me {
 			continue
 		}
 		rf.nextIndex[i] = len(rf.log)
 		rf.matchIndex[i] = 0
+		rf.heartbeatInProgress[i] = false
 	}
 }
 
@@ -440,10 +445,13 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 
 func (rf *Raft) sendHeartbeatToNode(nodeIdx int, replicateLogIfReplySuccess bool) {
 	rf.mu.Lock()
-	if !rf.isInState(Leader) {
+	if !rf.isInState(Leader) || rf.heartbeatInProgress[nodeIdx] {
+		rf.debugLog("skip heartbeat to node:%d current state:%d heartbeatInProgress:%t", nodeIdx, rf.state, rf.heartbeatInProgress[nodeIdx])
 		rf.mu.Unlock()
 		return
 	}
+
+	rf.heartbeatInProgress[nodeIdx] = true
 
 	aea := AppendEntriesArgs{}
 	aea.Term = rf.currentTerm
@@ -479,6 +487,10 @@ func (rf *Raft) sendHeartbeatToNode(nodeIdx int, replicateLogIfReplySuccess bool
 			}
 		}
 	}
+
+	rf.mu.Lock()
+	rf.heartbeatInProgress[nodeIdx] = false
+	rf.mu.Unlock()
 }
 
 func (rf *Raft) sendHeartbeat(replicateLogIfReplySuccess bool) {
