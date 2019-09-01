@@ -472,7 +472,7 @@ func (rf *Raft) sendHeartbeatToNode(nodeIdx int, replicateLogIfReplySuccess bool
 				rf.nextIndex[nodeIdx]--
 				rf.debugLog("node %d heartbeat fail, nextIndex--:%d", nodeIdx, rf.nextIndex[nodeIdx])
 				rf.mu.Unlock()
-				rf.sendHeartbeatToNode(nodeIdx, true)
+				rf.sendHeartbeatToNode(nodeIdx, replicateLogIfReplySuccess)
 			} else {
 				rf.mu.Unlock()
 				rf.debugLog("node %d heartbeat fail, nextIndex:%d", nodeIdx, rf.nextIndex[nodeIdx])
@@ -481,14 +481,14 @@ func (rf *Raft) sendHeartbeatToNode(nodeIdx int, replicateLogIfReplySuccess bool
 	}
 }
 
-func (rf *Raft) sendHeartbeat() {
+func (rf *Raft) sendHeartbeat(replicateLogIfReplySuccess bool) {
 	for idx := range rf.peers {
 		if idx == rf.me {
 			continue
 		}
 
-		go rf.sendHeartbeatToNode(idx, true)
-		rf.debugLog("heartbeat send to node:%d", idx)
+		go rf.sendHeartbeatToNode(idx, replicateLogIfReplySuccess)
+		rf.debugLog("heartbeat send to node:%d replicateLogIfReplySuccess:%t", idx, replicateLogIfReplySuccess)
 	}
 }
 
@@ -500,8 +500,7 @@ func stopTickerIfIsValid(ticker *time.Ticker) {
 
 func (rf *Raft) intervalSendHeartbeat() {
 	stopTickerIfIsValid(rf.heartbeatTicker)
-	go rf.sendHeartbeat()
-
+	go rf.sendHeartbeat(false)
 	ticker := time.NewTicker(150 * time.Millisecond)
 	rf.mu.Lock()
 	rf.heartbeatTicker = ticker
@@ -509,7 +508,7 @@ func (rf *Raft) intervalSendHeartbeat() {
 
 	go func() {
 		for range ticker.C {
-			rf.sendHeartbeat()
+			rf.sendHeartbeat(true)
 		}
 	}()
 }
@@ -628,7 +627,6 @@ func (rf *Raft) replicateLogToNode(nodeIndex int) {
 		return
 	}
 
-	rf.mu.Lock()
 	var aea AppendEntriesArgs
 	aea.Term = rf.currentTerm
 	aea.LeaderID = rf.me
@@ -638,6 +636,7 @@ func (rf *Raft) replicateLogToNode(nodeIndex int) {
 
 	aea.Entries = make([]LogEntry, len(rf.log[nextIndex:]))
 	copy(aea.Entries, rf.log[nextIndex:])
+	rf.mu.Lock()
 	rf.debugLog("send %d logs to node:%d from idx:%d, prevlogIndex:%d, prevLogTerm:%d", len(aea.Entries), nodeIndex, nextIndex, aea.PrevLogIndex, aea.PrevLogTerm)
 
 	rf.mu.Unlock()
@@ -651,8 +650,8 @@ func (rf *Raft) replicateLogToNode(nodeIndex int) {
 			rf.debugLog("node:%d reply success:%t term:%d", nodeIdx, aer.Success, aer.Term)
 			if aer.Success {
 				rf.mu.Lock()
-				rf.nextIndex[nodeIdx] += len(aea.Entries)
-				rf.matchIndex[nodeIdx] += len(aea.Entries)
+				rf.nextIndex[nodeIdx] = nextIndex + len(aea.Entries)
+				rf.matchIndex[nodeIdx] = matchIndex + len(aea.Entries)
 				rf.mu.Unlock()
 			} else {
 				rf.debugLog("node: %d nextIndex: %d fail replicate log", nodeIdx, rf.nextIndex[nodeIdx])
