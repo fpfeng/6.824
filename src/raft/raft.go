@@ -373,7 +373,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	isPrevTermMatchs := false
 	isLogLengthOk := false
 	isLogLengthOk = currentLogLength > args.PrevLogIndex
-	rf.debugLog("append params: [prevLogIndex:%d prevLogTerm:%d logLength:%d]", args.PrevLogIndex, args.PrevLogTerm, len(args.Entries))
+	rf.debugLog("append params: [prevLogIndex:%d prevLogTerm:%d logLength:%d], current log length:%d", args.PrevLogIndex, args.PrevLogTerm, len(args.Entries), currentLogLength)
 	if isLogLengthOk {
 		rf.debugLog("node prevLogTerm: %d", rf.log[args.PrevLogIndex].Term)
 		isPrevTermMatchs = rf.log[args.PrevLogIndex].Term == args.PrevLogTerm
@@ -457,7 +457,7 @@ func (rf *Raft) sendHeartbeatToNode(nodeIdx int, replicateLogIfReplySuccess bool
 	aea.Entries = nil
 	aea.LeaderCommit = rf.commitIndex
 	rf.mu.Unlock()
-	rf.debugLog("send heartbeat unlock")
+	rf.debugLog("send heartbeat unlock, prevLogTerm:%d prevLogIndex:%d", aea.PrevLogTerm, aea.PrevLogIndex)
 
 	aer := AppendEntriesReply{}
 	isOk := rf.sendAppendEntries(nodeIdx, &aea, &aer)
@@ -587,8 +587,8 @@ func (rf *Raft) checkApplyLog() {
 		if rf.commitIndex > rf.lastApplied {
 			am := ApplyMsg{
 				CommandValid: true,
-				Command:      rf.log[rf.commitIndex].Command,
-				CommandIndex: rf.commitIndex,
+				Command:      rf.log[rf.lastApplied+1].Command,
+				CommandIndex: rf.lastApplied + 1,
 			}
 			rf.lastApplied++
 
@@ -628,22 +628,17 @@ func (rf *Raft) replicateLogToNode(nodeIndex int) {
 		return
 	}
 
-	prevLogIndex := 0
-	if lastLogIndex > 0 {
-		prevLogIndex = lastLogIndex - 1
-	}
-
 	rf.mu.Lock()
 	var aea AppendEntriesArgs
 	aea.Term = rf.currentTerm
 	aea.LeaderID = rf.me
 	aea.LeaderCommit = rf.commitIndex
-	aea.PrevLogIndex = prevLogIndex
-	aea.PrevLogTerm = rf.log[prevLogIndex].Term
+	aea.PrevLogIndex = nextIndex - 1
+	aea.PrevLogTerm = rf.log[nextIndex-1].Term
 
 	aea.Entries = make([]LogEntry, len(rf.log[nextIndex:]))
 	copy(aea.Entries, rf.log[nextIndex:])
-	rf.debugLog("send %d logs to node:%d from idx:%d", len(aea.Entries), nodeIndex, nextIndex)
+	rf.debugLog("send %d logs to node:%d from idx:%d, prevlogIndex:%d, prevLogTerm:%d", len(aea.Entries), nodeIndex, nextIndex, aea.PrevLogIndex, aea.PrevLogTerm)
 
 	rf.mu.Unlock()
 
