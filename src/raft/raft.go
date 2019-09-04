@@ -727,12 +727,12 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	return index, term, isLeader
 }
 
-func (rf *Raft) stepAsLeader() {
+func (rf *Raft) becomeLeader() {
 	rf.mu.Lock()
 	if rf.state == Candidate {
 		rf.state = Leader
 		rf.initNextIndexAndMatchIndex()
-		rf.debugLog("******* step as leader *******")
+		rf.debugLog("******* become leader *******")
 	} else {
 		rf.debugLog("current state: %d, aint gonna do it", rf.state)
 	}
@@ -793,7 +793,7 @@ func (rf *Raft) startsElection() {
 				rf.mu.Unlock()
 
 				if getVotedCount > len(rf.peers)/2 {
-					rf.stepAsLeader()
+					rf.becomeLeader()
 					rf.intervalSendHeartbeat()
 					return
 				}
