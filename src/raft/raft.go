@@ -894,8 +894,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			case Leader:
 				rf.intervalSendHeartbeat()
 				rf.checkIncreaseCommitIndex()
-				sleepRandomRange(60, 80)
-				rf.debugLog("leader awake")
+				rf.debugLog("leader awake %dms", sleepRandomRange(60, 80))
 			}
 			rf.checkApplyLog()
 			rf.debugLog("end loop")
