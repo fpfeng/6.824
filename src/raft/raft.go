@@ -110,14 +110,11 @@ func (rf *Raft) debugLog(format string, a ...interface{}) (n int, err error) {
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
 
-	var term int
-	var isleader bool
-	// Your code here (2A).
 	rf.mu.Lock()
-	term = rf.currentTerm
-	isleader = rf.state == Leader
+	term := rf.currentTerm
+	isLeader := rf.isInState(Leader)
 	rf.mu.Unlock()
-	return term, isleader
+	return term, isLeader
 }
 
 //
