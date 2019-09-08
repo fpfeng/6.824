@@ -192,7 +192,7 @@ type AppendEntriesReply struct {
 }
 
 func (rf *Raft) resetToFollower() {
-	if rf.state != Follower {
+	if !rf.isInState(Follower) {
 		rf.debugLog("reset to follower")
 		rf.state = Follower
 		rf.votedFor = 0
@@ -703,9 +703,8 @@ func (rf *Raft) doReplicateLog() {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
 	term := -1
-	isLeader := false
 	rf.mu.Lock()
-	isLeader = rf.state == Leader
+	isLeader := rf.isInState(Leader)
 
 	if !isLeader {
 		rf.mu.Unlock()
@@ -726,7 +725,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 func (rf *Raft) becomeLeader() {
 	rf.mu.Lock()
-	if rf.state == Candidate {
+	if rf.isInState(Candidate) {
 		rf.state = Leader
 		rf.initNextIndexAndMatchIndex()
 		rf.debugLog("******* become leader *******")
