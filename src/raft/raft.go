@@ -771,9 +771,8 @@ func (rf *Raft) startsElection() {
 				return
 			}
 
-			var currentTerm int
 			rf.mu.Lock()
-			currentTerm = rf.currentTerm
+			currentTerm := rf.currentTerm
 			rf.mu.Unlock()
 			rf.debugLog("follower%d vote:[isOk:%t grant:%t term: %d], current term:%d", nodeIdx, isOk, rvr.VoteGranted, rvr.Term, currentTerm)
 			if rvr.Term < currentTerm && rvr.VoteGranted {
