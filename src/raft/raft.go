@@ -636,18 +636,17 @@ func (rf *Raft) replicateLogToNode(nodeIndex int) {
 		return
 	}
 
+	rf.mu.Lock()
 	var aea AppendEntriesArgs
 	aea.Term = rf.currentTerm
 	aea.LeaderID = rf.me
 	aea.LeaderCommit = rf.commitIndex
 	aea.PrevLogIndex = nextIndex - 1
 	aea.PrevLogTerm = rf.log[nextIndex-1].Term
-
 	aea.Entries = make([]LogEntry, len(rf.log[nextIndex:]))
 	copy(aea.Entries, rf.log[nextIndex:])
-	rf.mu.Lock()
-	rf.debugLog("send %d logs to node:%d from idx:%d, prevlogIndex:%d, prevLogTerm:%d", len(aea.Entries), nodeIndex, nextIndex, aea.PrevLogIndex, aea.PrevLogTerm)
 
+	rf.debugLog("send %d logs to node:%d from idx:%d, prevlogIndex:%d, prevLogTerm:%d", len(aea.Entries), nodeIndex, nextIndex, aea.PrevLogIndex, aea.PrevLogTerm)
 	rf.mu.Unlock()
 
 	go func(nodeIdx int) {
@@ -778,17 +777,16 @@ func (rf *Raft) startsElection() {
 			rf.mu.Unlock()
 			rf.debugLog("follower%d vote:[isOk:%t grant:%t term: %d], current term:%d", nodeIdx, isOk, rvr.VoteGranted, rvr.Term, currentTerm)
 			if rvr.Term < currentTerm && rvr.VoteGranted {
-				var getVotedCount int
 				rf.mu.Lock()
 				if rf.termGetVotedCount[currentTerm] == 0 {
 					rf.termGetVotedCount[currentTerm] = 2 // leader vote itself + current follower vote
 				} else {
 					rf.termGetVotedCount[currentTerm]++
 				}
-				getVotedCount = rf.termGetVotedCount[currentTerm]
+				becomeLeaderVoteCount := rf.termGetVotedCount[currentTerm]
 				rf.mu.Unlock()
 
-				if getVotedCount > len(rf.peers)/2 {
+				if becomeLeaderVoteCount > len(rf.peers)/2 {
 					rf.becomeLeader()
 					rf.intervalSendHeartbeat()
 					return
