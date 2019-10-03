@@ -664,6 +664,8 @@ func (rf *Raft) replicateLogToNode(nodeIndex int) {
 			} else {
 				rf.debugLog("node: %d nextIndex: %d fail replicate log", nodeIdx, rf.nextIndex[nodeIdx])
 			}
+		} else {
+			rf.debugLog("sendAppendEntries node:%d not ok")
 		}
 
 	}(nodeIndex)
@@ -715,7 +717,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index = len(rf.log) - 1
 	term = rf.currentTerm
 	rf.commitIndex++
-	rf.debugLog(">> append log")
+	rf.debugLog(">> append log, commitIndex: %d", rf.commitIndex)
 	rf.mu.Unlock()
 
 	go rf.doReplicateLog()
