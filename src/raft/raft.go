@@ -532,8 +532,8 @@ func (rf *Raft) checkIncreaseCommitIndex() {
 	rf.mu.Lock()
 	if !rf.isInState(Leader) {
 		rf.mu.Unlock()
-		return
 		rf.debugLog("state changed: %d, skip checkIncreaseCommitIndex", rf.state)
+		return
 	}
 
 	matchIndexCount := make(map[int]int)
@@ -716,7 +716,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.log = append(rf.log, le)
 	index = len(rf.log) - 1
 	term = rf.currentTerm
-	rf.commitIndex++
 	rf.debugLog(">> append log, commitIndex: %d", rf.commitIndex)
 	rf.mu.Unlock()
 
