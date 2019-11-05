@@ -665,7 +665,7 @@ func (rf *Raft) replicateLogToNode(nodeIndex int) {
 				rf.debugLog("node: %d nextIndex: %d fail replicate log", nodeIdx, rf.nextIndex[nodeIdx])
 			}
 		} else {
-			rf.debugLog("sendAppendEntries node:%d not ok")
+			rf.debugLog("sendAppendEntries node:%d not ok", nodeIdx)
 		}
 
 	}(nodeIndex)
