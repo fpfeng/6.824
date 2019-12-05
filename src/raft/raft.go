@@ -342,6 +342,7 @@ func (rf *Raft) deleteConflictEntries(newLogIndex int, newEnties []LogEntry) {
 	if len(newEnties) == 0 || len(rf.log) <= newLogIndex {
 		return
 	}
+
 	if rf.log[newLogIndex].Term != newEnties[0].Term {
 		rf.debugLog("deleteConflictEntries logs after index:%d", newLogIndex)
 		rf.log = rf.log[:newLogIndex]
@@ -392,7 +393,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.mu.Unlock()
 	newEntriesLength := len(args.Entries)
 
-	rf.debugLog("pass append pre-check [log length:%d]", newEntriesLength)
+	rf.debugLog("pass append pre-check [payload log length:%d]", newEntriesLength)
 	rf.checkTermSwitchFollower(args.Term)
 	reply.Success = true
 
@@ -425,6 +426,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if newEntriesLength > 0 {
 		rf.debugLog("new log content:%d", args.Entries[0].Command)
 		rf.debugLog("done AppendEntries with %d new log, current total log:%d", newEntriesLength, len(rf.log))
+		for idx, item := range rf.log {
+			rf.debugLog("log idx:%d, content:%d", idx, item.Command)
+		}
 	} else {
 		rf.debugLog("done heartbeat AppendEntries")
 	}
@@ -716,7 +720,10 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.log = append(rf.log, le)
 	index = len(rf.log) - 1
 	term = rf.currentTerm
-	rf.debugLog(">> append log, commitIndex: %d", rf.commitIndex)
+	rf.debugLog(">> append log, commitIndex: %d, length: %d, content: %d, prev content: %d", rf.commitIndex, len(rf.log), command, rf.log[index-1].Command)
+	for idx, item := range rf.log {
+		rf.debugLog("idx:%d, content:%d", idx, item.Command)
+	}
 	rf.mu.Unlock()
 
 	go rf.doReplicateLog()

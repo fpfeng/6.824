@@ -8,12 +8,15 @@ package raft
 // test with the original before submitting.
 //
 
-import "testing"
-import "fmt"
-import "time"
-import "math/rand"
-import "sync/atomic"
-import "sync"
+import (
+	"fmt"
+	"log"
+	"math/rand"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
 
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).
@@ -126,32 +129,32 @@ func TestFailAgree2B(t *testing.T) {
 
 	// follower network disconnection
 	leader := cfg.checkOneLeader()
-	fmt.Printf("disconnect node:%d\n", (leader+1)%servers)
+	// fmt.Printf("disconnect node:%d\n", (leader+1)%servers)
 	cfg.disconnect((leader + 1) % servers)
 
 	// agree despite one disconnected server?
 	cfg.one(102, servers-1, false)
-	fmt.Printf("102 pass\n")
+	// fmt.Printf("102 pass\n")
 	cfg.one(103, servers-1, false)
-	fmt.Printf("103 pass\n")
+	// fmt.Printf("103 pass\n")
 	time.Sleep(RaftElectionTimeout)
-	fmt.Printf("test sleep awake\n")
+	// fmt.Printf("test sleep awake\n")
 	cfg.one(104, servers-1, false)
-	fmt.Printf("104 pass\n")
+	// fmt.Printf("104 pass\n")
 	cfg.one(105, servers-1, false)
-	fmt.Printf("105 pass\n")
+	// fmt.Printf("105 pass\n")
 
 	// re-connect
 	cfg.connect((leader + 1) % servers)
-	fmt.Printf("reconnect node\n")
+	// fmt.Printf("reconnect node\n")
 
 	// agree with full set of servers?
 	cfg.one(106, servers, true)
-	fmt.Printf("106 pass\n")
+	// fmt.Printf("106 pass\n")
 	time.Sleep(RaftElectionTimeout)
-	fmt.Printf("test sleep awake\n")
+	// fmt.Printf("test sleep awake\n")
 	cfg.one(107, servers, true)
-	fmt.Printf("107 pass\n")
+	// fmt.Printf("107 pass\n")
 
 	cfg.end()
 }
@@ -179,8 +182,10 @@ func TestFailNoAgree2B(t *testing.T) {
 		t.Fatalf("expected index 2, got %v", index)
 	}
 
+	log.Printf("time to sleep")
 	time.Sleep(2 * RaftElectionTimeout)
 
+	log.Printf("time out")
 	n, _ := cfg.nCommitted(index)
 	if n > 0 {
 		t.Fatalf("%v committed but no majority", n)
@@ -202,6 +207,7 @@ func TestFailNoAgree2B(t *testing.T) {
 		t.Fatalf("unexpected index %v", index2)
 	}
 
+	log.Printf("append 1000")
 	cfg.one(1000, servers, true)
 
 	cfg.end()

@@ -440,12 +440,14 @@ func (cfg *config) one(cmd int, expectedServers int, retry bool) int {
 			if rf != nil {
 				index1, _, ok := rf.Start(cmd)
 				if ok {
+					fmt.Printf("leader index: %d\n", index1)
 					index = index1
 					break
 				}
 			}
 		}
 
+		fmt.Printf("cmd: %d, commit index: %d\n", cmd, index)
 		if index != -1 {
 			// somebody claimed to be the leader and to have
 			// submitted our command; wait a while for agreement.
@@ -463,7 +465,7 @@ func (cfg *config) one(cmd int, expectedServers int, retry bool) int {
 				time.Sleep(20 * time.Millisecond)
 			}
 			if retry == false {
-				cfg.t.Fatalf("one(%v) failed to reach agreement", cmd)
+				cfg.t.Fatalf("one(%v) failed to reach agreement x", cmd)
 			}
 		} else {
 			time.Sleep(50 * time.Millisecond)
