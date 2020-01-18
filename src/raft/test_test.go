@@ -146,7 +146,7 @@ func TestFailAgree2B(t *testing.T) {
 
 	// re-connect
 	cfg.connect((leader + 1) % servers)
-	// fmt.Printf("reconnect node\n")
+	fmt.Printf("reconnect node\n")
 
 	// agree with full set of servers?
 	cfg.one(106, servers, true)

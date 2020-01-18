@@ -346,6 +346,8 @@ func (rf *Raft) deleteConflictEntries(newLogIndex int, newEnties []LogEntry) {
 	if rf.log[newLogIndex].Term != newEnties[0].Term {
 		rf.debugLog("deleteConflictEntries logs after index:%d", newLogIndex)
 		rf.log = rf.log[:newLogIndex]
+	} else {
+		rf.deleteConflictEntries(newLogIndex+1, newEnties)
 	}
 }
 
@@ -402,7 +404,25 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.deleteConflictEntries(args.PrevLogIndex+1, args.Entries)
 	if newEntriesLength > 0 {
 		// Append any new entries not already in the log 这里感觉不对
-		rf.log = append(rf.log, args.Entries...)
+		for idx, newLog := range args.Entries {
+			logIndex := args.PrevLogIndex + idx + 1
+
+			if logIndex >= len(rf.log) {
+				rf.log = append(rf.log, newLog)
+			}
+
+			localLog := rf.log[logIndex]
+			cmd1, ok1 := localLog.Command.(int)
+			cmd2, ok2 := newLog.Command.(int)
+
+			if ok1 && ok2 {
+				if cmd1 == cmd2 {
+					continue
+				} else {
+					rf.log[logIndex] = newLog
+				}
+			}
+		}
 	}
 
 	if args.LeaderCommit > rf.commitIndex {
